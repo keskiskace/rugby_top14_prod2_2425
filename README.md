@@ -18,7 +18,7 @@ Data is scraped from public sources and provided for educational purposes only.
 ## Installation
 1. **Clone the repository**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/oggyToupie/rugby_top14_2425
    cd rugby_top14_2425
    ```
 2. **Create a virtual environment (recommended)**
