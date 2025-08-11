@@ -26,7 +26,7 @@ st.set_page_config(page_title="Rugby Stats", layout="wide")
 # -----------------------------------------------------------------
 # CONSTANTES – à adapter
 # -----------------------------------------------------------------
-DB_FILE  = r"C:\Users\toupi\OneDrive\Bureau\rugby_data\top14_players.db"
+DB_FILE  = "top14_players.db"
 TABLE    = "players"
 
 POSTES_LAYOUT = [
@@ -1063,3 +1063,4 @@ elif page == "Recherche similarité":
             if st.button("Voir", key=f"goto_{row['nom']}"):
                 st.session_state.current_player = row['nom']     # page 1
                 st.session_state.current_page   = "Visualisation joueur"
+
