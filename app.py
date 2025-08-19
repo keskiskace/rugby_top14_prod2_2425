@@ -26,8 +26,8 @@ st.set_page_config(page_title="Rugby Stats", layout="wide")
 # -----------------------------------------------------------------
 # CONSTANTES – à adapter
 # -----------------------------------------------------------------
-DB_FILE  = "24_25_prod2_top14.db"
-TABLE    = "prod2_24_25,top14_24_25"
+DB_FILE  = "top14_prod2_players.db"
+TABLE    = "players"
 
 POSTES_LAYOUT = [
         ['Pilier gauche', 'Talonneur', 'Pilier droit'],                         # 1-2-3
@@ -65,19 +65,16 @@ REF_TEAM = {           # ids de joueurs « équipe de référence »
 @st.cache_data
 def load_players():
     with sqlite3.connect(DB_FILE) as con:
-        df_top14 = pd.read_sql("SELECT * FROM top14_24_25", con)
-        df_prod2 = pd.read_sql("SELECT * FROM prod2_24_25", con)
+        df = pd.read_sql(f"SELECT * FROM {TABLE}", con)
 
-    # Fusion
-    df = pd.concat([df_top14, df_prod2], ignore_index=True)
+    # Création du ratio (cm / kg)
+    df['ratio_poids_taille'] =  round(df['poids_kg'] / df['taille_cm'], 2)
 
-    # Nettoyage (supprime doublons éventuels)
-    df = df.drop_duplicates()
+    # Création du ratio (metres / courses)
+    df['ratio_metres_courses'] =  round(df['metres_parcourus'] / df['courses'], 2)
 
-    # Ajout des ratios comme avant
-    df['ratio_poids_taille'] = df['poids_kg'] / df['taille_cm']
-    df['ratio_metres_courses'] = df['metres_parcourus'] / df['courses']
-    df['ratio_min_matchs'] = df['temps_jeu_min'] / df['nombre_matchs_joues']
+    # Création du ratio (min / matchs)
+    df['ratio_min_matchs'] =  round(df['temps_jeu_min'] / df['nombre_matchs_joues'], 2)
 
     return df
 
@@ -491,6 +488,7 @@ st.session_state.current_page = page      # mémorise le choix
 # ================================================================
 if page == "Visualisation joueur":
 
+
     st.header("Visualisation individuelle")
     # ------------------------------------------------------------------------------
     # 0) session pour le joueur sélectionné
@@ -511,16 +509,11 @@ if page == "Visualisation joueur":
             on_change=update_stats          # ← déclenche la callback
         )
 
+
     mask = pd.Series(True, index=df.index)      # tout passe au départ
 
     with st.sidebar:
         st.markdown("### Filtres (facultatifs)")
-
-        # --- Division -----------------------------------------------------
-        divisions = sorted(df['division'].dropna().unique())
-        sel_divisions = st.multiselect("Division", divisions)   # défaut = []
-        if sel_divisions:
-            mask &= df['division'].isin(sel_divisions)
 
         # --- Poste --------------------------------------------------------
         postes = sorted(df['poste'].dropna().unique())
@@ -550,7 +543,6 @@ if page == "Visualisation joueur":
 
     df_filt = df[mask]
     st.sidebar.markdown(f"**{len(df_filt)} joueur(s)** correspondant(s)")
-
 
 
 
@@ -1071,3 +1063,4 @@ elif page == "Recherche similarité":
             if st.button("Voir", key=f"goto_{row['nom']}"):
                 st.session_state.current_player = row['nom']     # page 1
                 st.session_state.current_page   = "Visualisation joueur"
+
