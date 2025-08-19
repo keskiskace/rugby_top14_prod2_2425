@@ -67,16 +67,21 @@ def load_players():
     with sqlite3.connect(DB_FILE) as con:
         df = pd.read_sql(f"SELECT * FROM {TABLE}", con)
 
-    # Création du ratio (cm / kg)
-    df['ratio_poids_taille'] =  round(df['poids_kg'] / df['taille_cm'], 2)
+    # Conversion en numérique
+    df['poids_kg'] = pd.to_numeric(df['poids_kg'], errors='coerce')
+    df['taille_cm'] = pd.to_numeric(df['taille_cm'], errors='coerce')
+    df['courses'] = pd.to_numeric(df['courses'], errors='coerce')
+    df['metres_parcourus'] = pd.to_numeric(df['metres_parcourus'], errors='coerce')
+    df['temps_jeu_min'] = pd.to_numeric(df['temps_jeu_min'], errors='coerce')
+    df['nombre_matchs_joues'] = pd.to_numeric(df['nombre_matchs_joues'], errors='coerce')
 
-    # Création du ratio (metres / courses)
-    df['ratio_metres_courses'] =  round(df['metres_parcourus'] / df['courses'], 2)
-
-    # Création du ratio (min / matchs)
-    df['ratio_min_matchs'] =  round(df['temps_jeu_min'] / df['nombre_matchs_joues'], 2)
+    # Création des ratios (avec gestion des NaN et divisions par zéro)
+    df['ratio_poids_taille'] = (df['poids_kg'] / df['taille_cm']).replace([np.inf, -np.inf], np.nan).round(2)
+    df['ratio_metres_courses'] = (df['metres_parcourus'] / df['courses']).replace([np.inf, -np.inf], np.nan).round(2)
+    df['ratio_min_matchs'] = (df['temps_jeu_min'] / df['nombre_matchs_joues']).replace([np.inf, -np.inf], np.nan).round(2)
 
     return df
+
 
 df = load_players()
 exclude_exact = {
