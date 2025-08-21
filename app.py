@@ -81,7 +81,29 @@ def load_players():
     df['ratio_min_matchs'] = (df['temps_jeu_min'] / df['nombre_matchs_joues']).replace([np.inf, -np.inf], np.nan).round(2)
 
     return df
+import requests
 
+def download_missing_photos(df, img_dir="images"):
+    os.makedirs(img_dir, exist_ok=True)
+    for _, row in df.iterrows():
+        player_id = row["player_id"]
+        url = row["photo"]
+        if not url or pd.isna(url):
+            continue
+
+        img_path = os.path.join(img_dir, f"photo_{player_id}.jpg")
+
+        if not os.path.exists(img_path):
+            try:
+                r = requests.get(url, timeout=10)
+                r.raise_for_status()
+                with open(img_path, "wb") as f:
+                    f.write(r.content)
+                print(f"[OK] Photo téléchargée pour joueur {row['nom']}")
+            except Exception as e:
+                print(f"[ERREUR] {row['nom']} ({url}) : {e}")
+
+    return df
 
 df = load_players()
 exclude_exact = {
@@ -1068,4 +1090,5 @@ elif page == "Recherche similarité":
             if st.button("Voir", key=f"goto_{row['nom']}"):
                 st.session_state.current_player = row['nom']     # page 1
                 st.session_state.current_page   = "Visualisation joueur"
+
 
