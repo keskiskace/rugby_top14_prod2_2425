@@ -13,14 +13,25 @@ TABLE = "players"
 # -----------------------------------------------------------------
 # IMAGE MANAGEMENT
 # -----------------------------------------------------------------
-def get_image_base64(path, fallback="images/no_player.webp"):
-    try:
-        with open(path, "rb") as f:
-            data = f.read()
-    except FileNotFoundError:
-        with open(fallback, "rb") as f:
-            data = f.read()
-    return base64.b64encode(data).decode()
+def get_image_safe(player):
+    fallback = "images/no_player.webp"
+    img_path = f"images/photo_{player['player_id']}.jpg"
+
+    # 1. Vérifie si image locale existe
+    if os.path.exists(img_path):
+        return img_path
+
+    # 2. Sinon, essaye l'URL depuis la DB
+    if isinstance(player['photo'], str) and player['photo'].startswith("http"):
+        try:
+            r = requests.get(player['photo'], timeout=5)
+            r.raise_for_status()
+            return player['photo']
+        except Exception:
+            pass
+
+    # 3. Fallback générique
+    return fallback
 
 
 def download_missing_photos(df, img_dir="images"):
@@ -89,12 +100,11 @@ with st.spinner("Vérification des photos manquantes..."):
 selected_name = st.selectbox("Choisir un joueur", df['nom'].sort_values().unique())
 joueur = df[df['nom'] == selected_name].iloc[0]
 
-# Affichage de la photo
-img_path = f"images/photo_{joueur['player_id']}.jpg"
-img_base64 = get_image_base64(img_path)
+# Affichage sécurisé de la photo
+photo_to_show = get_image_safe(joueur)
+st.image(photo_to_show, caption=joueur['club'], width=200)
 
 st.subheader(joueur['nom'])
-st.image(img_path, caption=joueur['club'], width=200)
 
 st.write("Détails du joueur :")
 st.json({
