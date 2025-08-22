@@ -1,11 +1,11 @@
 import os
 import sqlite3
-import base64
 import requests
 import pandas as pd
 import numpy as np
 import streamlit as st
 import plotly.express as px
+from io import BytesIO
 
 DB_FILE = "top14_prod2_players.db"
 TABLE = "players"
@@ -17,11 +17,9 @@ def get_image_safe(player):
     fallback = "images/no_player.webp"
     img_path = f"images/photo_{player['player_id']}.jpg"
 
-    # 1. Vérifie si image locale existe
     if os.path.exists(img_path):
         return img_path
 
-    # 2. Sinon, essaye l'URL depuis la DB
     if isinstance(player['photo'], str) and player['photo'].startswith("http"):
         try:
             r = requests.get(player['photo'], timeout=5)
@@ -30,7 +28,6 @@ def get_image_safe(player):
         except Exception:
             pass
 
-    # 3. Fallback générique
     return fallback
 
 
@@ -63,18 +60,17 @@ def load_players():
     with sqlite3.connect(DB_FILE) as con:
         df = pd.read_sql(f"SELECT * FROM {TABLE}", con)
 
-    # Conversion en numérique
-    df['poids_kg'] = pd.to_numeric(df['poids_kg'], errors='coerce')
-    df['taille_cm'] = pd.to_numeric(df['taille_cm'], errors='coerce')
-    df['courses'] = pd.to_numeric(df['courses'], errors='coerce')
-    df['metres_parcourus'] = pd.to_numeric(df['metres_parcourus'], errors='coerce')
-    df['temps_jeu_min'] = pd.to_numeric(df['temps_jeu_min'], errors='coerce')
-    df['nombre_matchs_joues'] = pd.to_numeric(df['nombre_matchs_joues'], errors='coerce')
+    # Conversion en numérique (si possible)
+    for col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors='ignore')
 
     # Ratios
-    df['ratio_poids_taille'] = (df['poids_kg'] / df['taille_cm']).replace([np.inf, -np.inf], np.nan).round(2)
-    df['ratio_metres_courses'] = (df['metres_parcourus'] / df['courses']).replace([np.inf, -np.inf], np.nan).round(2)
-    df['ratio_min_matchs'] = (df['temps_jeu_min'] / df['nombre_matchs_joues']).replace([np.inf, -np.inf], np.nan).round(2)
+    if "poids_kg" in df.columns and "taille_cm" in df.columns:
+        df['ratio_poids_taille'] = (pd.to_numeric(df['poids_kg'], errors='coerce') / pd.to_numeric(df['taille_cm'], errors='coerce')).replace([np.inf, -np.inf], np.nan).round(2)
+    if "metres_parcourus" in df.columns and "courses" in df.columns:
+        df['ratio_metres_courses'] = (pd.to_numeric(df['metres_parcourus'], errors='coerce') / pd.to_numeric(df['courses'], errors='coerce')).replace([np.inf, -np.inf], np.nan).round(2)
+    if "temps_jeu_min" in df.columns and "nombre_matchs_joues" in df.columns:
+        df['ratio_min_matchs'] = (pd.to_numeric(df['temps_jeu_min'], errors='coerce') / pd.to_numeric(df['nombre_matchs_joues'], errors='coerce')).replace([np.inf, -np.inf], np.nan).round(2)
 
     return df
 
@@ -89,16 +85,17 @@ st.title("🏉 Rugby Top14/Prod2 Players")
 df = load_players()
 
 # Créer joueurs types (moyennes hors joueurs à 0 match)
-df_nonzero = df[df['nombre_matchs_joues'] > 0]
-top14_avg = df_nonzero[df_nonzero['club'].str.contains("Top14", case=False)].mean(numeric_only=True)
-prod2_avg = df_nonzero[df_nonzero['club'].str.contains("Prod2", case=False)].mean(numeric_only=True)
+df_nonzero = df[df.get('nombre_matchs_joues', 0) > 0]
+if not df_nonzero.empty:
+    top14_avg = df_nonzero[df_nonzero['club'].str.contains("Top14", case=False, na=False)].mean(numeric_only=True)
+    prod2_avg = df_nonzero[df_nonzero['club'].str.contains("Prod2", case=False, na=False)].mean(numeric_only=True)
 
-joueur_type_top14 = {"nom": "Joueur type Top14", "club": "Top14", **top14_avg.to_dict()}
-joueur_type_prod2 = {"nom": "Joueur type ProD2", "club": "ProD2", **prod2_avg.to_dict()}
-
-# Fusionner dans df pour pouvoir sélectionner
-extra_df = pd.DataFrame([joueur_type_top14, joueur_type_prod2])
-df_extended = pd.concat([df, extra_df], ignore_index=True)
+    joueur_type_top14 = {"nom": "Joueur type Top14", "club": "Top14", **top14_avg.to_dict()}
+    joueur_type_prod2 = {"nom": "Joueur type ProD2", "club": "ProD2", **prod2_avg.to_dict()}
+    extra_df = pd.DataFrame([joueur_type_top14, joueur_type_prod2])
+    df_extended = pd.concat([df, extra_df], ignore_index=True)
+else:
+    df_extended = df.copy()
 
 # Téléchargement auto des photos manquantes
 with st.spinner("Vérification des photos manquantes..."):
@@ -121,30 +118,26 @@ for _, joueur in selected_players.iterrows():
 
         st.json({
             "Club": joueur['club'],
-            "Poste": joueur['poste'],
-            "Âge": joueur['age'],
-            "Taille (cm)": joueur['taille_cm'],
-            "Poids (kg)": joueur['poids_kg'],
-            "Ratio poids/taille": joueur['ratio_poids_taille']
+            "Poste": joueur.get('poste', 'N/A'),
+            "Âge": joueur.get('age', 'N/A'),
+            "Taille (cm)": joueur.get('taille_cm', 'N/A'),
+            "Poids (kg)": joueur.get('poids_kg', 'N/A'),
+            "Ratio poids/taille": joueur.get('ratio_poids_taille', 'N/A')
         })
     else:
         st.subheader(joueur['nom'])
         st.info("📊 Joueur type basé sur la moyenne des stats.")
 
-# Radar chart des stats principales
-base_stats = {
-    "Matchs joués": "nombre_matchs_joues",
-    "Temps de jeu (min)": "temps_jeu_min",
-    "Courses": "courses",
-    "Mètres parcourus": "metres_parcourus",
-    "Plaquages réussis": "plaquages_reussis",
-}
+# Colonnes numériques disponibles
+numeric_cols = df_extended.select_dtypes(include=[np.number]).columns.tolist()
+exclude_cols = ["player_id"]
+stat_cols = [c for c in numeric_cols if c not in exclude_cols]
 
-# Sélecteur de stats à afficher
+# Sélecteur de stats dynamiques
 selected_stats = st.multiselect(
     "Choisir les statistiques à afficher dans le radar",
-    options=list(base_stats.keys()),
-    default=list(base_stats.keys())
+    options=stat_cols,
+    default=stat_cols[:5] if len(stat_cols) > 5 else stat_cols
 )
 
 if selected_stats and not selected_players.empty:
@@ -152,7 +145,7 @@ if selected_stats and not selected_players.empty:
     for _, joueur in selected_players.iterrows():
         radar_data.append({
             "Joueur": joueur['nom'],
-            **{stat: joueur.get(base_stats[stat], np.nan) for stat in selected_stats}
+            **{stat: joueur.get(stat, np.nan) for stat in selected_stats}
         })
 
     radar_df = pd.DataFrame(radar_data)
@@ -169,7 +162,11 @@ if selected_stats and not selected_players.empty:
 
     # Export CSV / Excel
     st.download_button("⬇️ Télécharger en CSV", table_df.to_csv().encode("utf-8"), file_name="comparatif_joueurs.csv", mime="text/csv")
-    st.download_button("⬇️ Télécharger en Excel", table_df.to_excel("comparatif_joueurs.xlsx"), file_name="comparatif_joueurs.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        table_df.to_excel(writer, sheet_name="Comparatif")
+    st.download_button("⬇️ Télécharger en Excel", output.getvalue(), file_name="comparatif_joueurs.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 else:
     st.warning("Veuillez sélectionner au moins une statistique et un joueur pour afficher le radar.")
