@@ -97,9 +97,9 @@ if not df_nonzero.empty:
 
     # Joueurs types par poste
     postes_groupes = {
-        "Joueur type Avant": ["Pilier gauche", "Pilier droit", "Talonner"],
-        "Joueur type 2eme ligne": ["2eme ligne gauche", "2eme ligne droit"],
-        "Joueur type 3eme ligne": ["3eme ligne", "3eme ligne centre"],
+        "Joueur type Avant": ["Pilier gauche", "Pilier droit", "Talonner", "1ère ligne"],
+        "Joueur type 2eme ligne": ["2eme ligne gauche", "2eme ligne droit", "2ème ligne"],
+        "Joueur type 3eme ligne": ["3eme ligne", "3eme ligne centre", "3ème ligne"],
         "Joueur type demi de melee": ["Demi de mêlée"],
         "Joueur type demi d'ouverture": ["Demi d'ouverture"],
         "Joueur type ailier": ["Ailier"],
@@ -206,3 +206,4 @@ if selected_stats and not selected_players.empty:
 
 else:
     st.warning("Veuillez sélectionner au moins une statistique et un joueur pour afficher le radar.")
+
