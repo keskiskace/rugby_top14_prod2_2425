@@ -193,7 +193,7 @@ if selected_stats and not selected_players.empty:
         markers=True
     )
     fig.update_traces(fill="toself", mode="lines+markers")
-    fig.update_layout(hovermode="closest", width=800, height=600)
+    fig.update_layout(hovermode="closest", width=900, height=700)
     st.plotly_chart(fig, use_container_width=True)
 
     # Tableau comparatif chiffré
@@ -206,5 +206,6 @@ if selected_stats and not selected_players.empty:
 
 else:
     st.warning("Veuillez sélectionner au moins une statistique et un joueur pour afficher le radar.")
+
 
 
