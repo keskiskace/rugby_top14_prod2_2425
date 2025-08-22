@@ -97,9 +97,9 @@ if not df_nonzero.empty:
 
     # Joueurs types par poste
     postes_groupes = {
-        "Joueur type Avant": ["Pilier gauche", "Pilier droit", "Talonner", "1ère ligne"],
-        "Joueur type 2eme ligne": ["2eme ligne gauche", "2eme ligne droit", "2ème ligne"],
-        "Joueur type 3eme ligne": ["3eme ligne", "3eme ligne centre", "3ème ligne"],
+        "Joueur type Avant": ["Pilier gauche", "Pilier droit", "Talonner"],
+        "Joueur type 2eme ligne": ["2eme ligne gauche", "2eme ligne droit"],
+        "Joueur type 3eme ligne": ["3eme ligne", "3eme ligne centre"],
         "Joueur type demi de melee": ["Demi de mêlée"],
         "Joueur type demi d'ouverture": ["Demi d'ouverture"],
         "Joueur type ailier": ["Ailier"],
@@ -193,8 +193,17 @@ if selected_stats and not selected_players.empty:
         markers=True
     )
     fig.update_traces(fill="toself", mode="lines+markers")
-    fig.update_layout(hovermode="closest", width=900, height=700)
-    st.plotly_chart(fig, use_container_width=True)
+    fig.update_layout(hovermode="closest", width=800, height=600, polar=dict(radialaxis=dict(showticklabels=True)))
+
+    # Affichage avec zoom et plein écran
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={
+            "scrollZoom": True,
+            "displaylogo": False,
+        }
+    )
 
     # Tableau comparatif chiffré
     st.subheader("📊 Tableau comparatif des joueurs")
@@ -206,6 +215,3 @@ if selected_stats and not selected_players.empty:
 
 else:
     st.warning("Veuillez sélectionner au moins une statistique et un joueur pour afficher le radar.")
-
-
-
