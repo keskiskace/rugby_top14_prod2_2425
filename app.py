@@ -166,7 +166,7 @@ if selected_stats and not selected_players.empty:
         markers=True
     )
     fig.update_traces(fill="toself", mode="lines+markers")
-    fig.update_layout(hovermode="closest")
+    fig.update_layout(hovermode="closest", width=1000, height=800)
     st.plotly_chart(fig, use_container_width=True)
 
     # Tableau comparatif chiffré
@@ -174,13 +174,8 @@ if selected_stats and not selected_players.empty:
     table_df = radar_df.set_index("Joueur").T
     st.dataframe(table_df)
 
-    # Export CSV / Excel
+    # Export CSV uniquement
     st.download_button("⬇️ Télécharger en CSV", table_df.to_csv().encode("utf-8"), file_name="comparatif_joueurs.csv", mime="text/csv")
-
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        table_df.to_excel(writer, sheet_name="Comparatif")
-    st.download_button("⬇️ Télécharger en Excel", output.getvalue(), file_name="comparatif_joueurs.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 else:
     st.warning("Veuillez sélectionner au moins une statistique et un joueur pour afficher le radar.")
