@@ -76,7 +76,7 @@ def load_players():
 
 
 # -----------------------------------------------------------------
-# CUSTOM RADAR SCATTER
+# CUSTOM RADAR SCATTER WITH GRID
 # -----------------------------------------------------------------
 def make_scatter_radar(radar_df, selected_stats):
     fig = go.Figure()
@@ -84,9 +84,49 @@ def make_scatter_radar(radar_df, selected_stats):
     n_stats = len(selected_stats)
     angles = np.linspace(0, 2*np.pi, n_stats, endpoint=False)
 
+    # Déterminer le max global pour la grille
+    max_val = radar_df[selected_stats].max().max()
+    n_circles = 5
+    step = max_val / n_circles if max_val > 0 else 1
+
+    # Ajouter cercles concentriques
+    for i in range(1, n_circles+1):
+        r = step * i
+        circle_x = [r*np.cos(t) for t in np.linspace(0, 2*np.pi, 200)]
+        circle_y = [r*np.sin(t) for t in np.linspace(0, 2*np.pi, 200)]
+        fig.add_trace(go.Scatter(
+            x=circle_x,
+            y=circle_y,
+            mode="lines",
+            line=dict(color="lightgrey", dash="dot"),
+            showlegend=False,
+            hoverinfo="skip"
+        ))
+
+    # Ajouter axes radiaux et labels
+    for angle, stat in zip(angles, selected_stats):
+        x_axis = [0, max_val*np.cos(angle)]
+        y_axis = [0, max_val*np.sin(angle)]
+        fig.add_trace(go.Scatter(
+            x=x_axis,
+            y=y_axis,
+            mode="lines",
+            line=dict(color="lightgrey", dash="dot"),
+            showlegend=False,
+            hoverinfo="skip"
+        ))
+        # Label au bout de l'axe
+        fig.add_annotation(
+            x=max_val*1.05*np.cos(angle),
+            y=max_val*1.05*np.sin(angle),
+            text=stat,
+            showarrow=False,
+            font=dict(size=12, color="black")
+        )
+
+    # Tracer les joueurs
     for _, row in radar_df.iterrows():
         r_values = [row[stat] for stat in selected_stats]
-        # fermer le polygone
         r_values += [r_values[0]]
         theta = np.append(angles, angles[0])
 
@@ -223,9 +263,9 @@ if selected_stats and not selected_players.empty:
         fig,
         use_container_width=True,
         config={
-            "scrollZoom": True,   # zoom/dézoom molette
+            "scrollZoom": True,
             "displaylogo": False,
-            "doubleClick": "reset"  # reset avec double clic
+            "doubleClick": "reset"
         }
     )
 
