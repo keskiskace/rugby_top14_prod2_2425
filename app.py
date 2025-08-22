@@ -151,7 +151,17 @@ if selected_stats and not selected_players.empty:
     radar_df = pd.DataFrame(radar_data)
     radar_df_melt = radar_df.melt(id_vars="Joueur", value_vars=selected_stats, var_name="Stat", value_name="Valeur")
 
-    fig = px.line_polar(radar_df_melt, r="Valeur", theta="Stat", color="Joueur", line_close=True)
+    # Palette de couleurs distinctes
+    color_sequence = px.colors.qualitative.Set1 + px.colors.qualitative.Set2 + px.colors.qualitative.Set3
+
+    fig = px.line_polar(
+        radar_df_melt,
+        r="Valeur",
+        theta="Stat",
+        color="Joueur",
+        line_close=True,
+        color_discrete_sequence=color_sequence
+    )
     fig.update_traces(fill="toself")
     st.plotly_chart(fig, use_container_width=True)
 
