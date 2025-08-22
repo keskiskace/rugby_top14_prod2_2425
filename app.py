@@ -162,9 +162,10 @@ if selected_stats and not selected_players.empty:
         line_close=True,
         color_discrete_sequence=color_sequence,
         hover_name="Stat",
-        hover_data={"Valeur": ":.2f", "Joueur": True}
+        hover_data={"Valeur": ":.2f", "Joueur": True},
+        markers=True
     )
-    fig.update_traces(fill="toself")
+    fig.update_traces(fill="toself", mode="lines+markers")
     fig.update_layout(hovermode="closest")
     st.plotly_chart(fig, use_container_width=True)
 
