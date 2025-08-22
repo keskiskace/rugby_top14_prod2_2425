@@ -86,16 +86,36 @@ df = load_players()
 
 # Créer joueurs types (moyennes hors joueurs à 0 match)
 df_nonzero = df[df.get('nombre_matchs_joues', 0) > 0]
+extra_players = []
+
 if not df_nonzero.empty:
+    # Joueurs types Top14 et ProD2
     top14_avg = df_nonzero[df_nonzero['club'].str.contains("Top14", case=False, na=False)].mean(numeric_only=True)
     prod2_avg = df_nonzero[df_nonzero['club'].str.contains("Prod2", case=False, na=False)].mean(numeric_only=True)
+    extra_players.append({"nom": "Joueur type Top14", "club": "Top14", **top14_avg.to_dict()})
+    extra_players.append({"nom": "Joueur type ProD2", "club": "ProD2", **prod2_avg.to_dict()})
 
-    joueur_type_top14 = {"nom": "Joueur type Top14", "club": "Top14", **top14_avg.to_dict()}
-    joueur_type_prod2 = {"nom": "Joueur type ProD2", "club": "ProD2", **prod2_avg.to_dict()}
-    extra_df = pd.DataFrame([joueur_type_top14, joueur_type_prod2])
-    df_extended = pd.concat([df, extra_df], ignore_index=True)
-else:
-    df_extended = df.copy()
+    # Joueurs types par poste
+    postes_groupes = {
+        "Joueur type Avant": ["Pilier gauche", "Pilier droit", "Talonner"],
+        "Joueur type 2eme ligne": ["2eme ligne gauche", "2eme ligne droit"],
+        "Joueur type 3eme ligne": ["3eme ligne", "3eme ligne centre"],
+        "Joueur type demi de melee": ["Demi de mêlée"],
+        "Joueur type demi d'ouverture": ["Demi d'ouverture"],
+        "Joueur type ailier": ["Ailier"],
+        "Joueur type centre": ["Centre"],
+        "Joueur type arriere": ["Arrière"]
+    }
+
+    for nom_type, postes in postes_groupes.items():
+        subset = df_nonzero[df_nonzero['poste'].isin(postes)]
+        if not subset.empty:
+            avg_stats = subset.mean(numeric_only=True)
+            extra_players.append({"nom": nom_type, "club": "Poste moyen", **avg_stats.to_dict()})
+
+extra_df = pd.DataFrame(extra_players) if extra_players else pd.DataFrame()
+
+df_extended = pd.concat([df, extra_df], ignore_index=True) if not extra_df.empty else df.copy()
 
 # Téléchargement auto des photos manquantes
 with st.spinner("Vérification des photos manquantes..."):
@@ -105,11 +125,18 @@ with st.spinner("Vérification des photos manquantes..."):
     else:
         st.info("Toutes les photos sont déjà présentes 👍")
 
-# Sélection d'un ou plusieurs joueurs
-selected_names = st.multiselect("Choisir un ou plusieurs joueurs", df_extended['nom'].sort_values().unique(), default=[df_extended['nom'].sort_values().iloc[0]])
-selected_players = df_extended[df_extended['nom'].isin(selected_names)]
+# Sélection des vrais joueurs
+selected_names = st.multiselect("Choisir un ou plusieurs joueurs", df['nom'].sort_values().unique(), default=[df['nom'].sort_values().iloc[0]])
+selected_players = df[df['nom'].isin(selected_names)]
 
-# Affichage des photos et infos (uniquement pour vrais joueurs)
+# Sélection des joueurs types
+selected_types = st.multiselect("Choisir un ou plusieurs joueurs types", extra_df['nom'].sort_values().unique() if not extra_df.empty else [])
+selected_type_players = extra_df[extra_df['nom'].isin(selected_types)] if not extra_df.empty else pd.DataFrame()
+
+# Concaténer la sélection
+selected_players = pd.concat([selected_players, selected_type_players], ignore_index=True)
+
+# Affichage des infos
 for _, joueur in selected_players.iterrows():
     if "Joueur type" not in joueur['nom']:
         st.subheader(joueur['nom'])
