@@ -95,16 +95,16 @@ if not df_nonzero.empty:
     extra_players.append({"nom": "Joueur type Top14", "club": "Top14", **top14_avg.to_dict()})
     extra_players.append({"nom": "Joueur type ProD2", "club": "ProD2", **prod2_avg.to_dict()})
 
-    # Joueurs types par poste
+    # Joueurs types par poste (robuste sur quelques variantes d'intitulés)
     postes_groupes = {
-        "Joueur type Avant": ["Pilier gauche", "Pilier droit", "Talonner"],
-        "Joueur type 2eme ligne": ["2eme ligne gauche", "2eme ligne droit"],
-        "Joueur type 3eme ligne": ["3eme ligne", "3eme ligne centre"],
-        "Joueur type demi de melee": ["Demi de mêlée"],
-        "Joueur type demi d'ouverture": ["Demi d'ouverture"],
-        "Joueur type ailier": ["Ailier"],
-        "Joueur type centre": ["Centre"],
-        "Joueur type arriere": ["Arrière"]
+        "Joueur type Avant": ["Pilier gauche", "Pilier droit", "Talonneur", "Talonner"],
+        "Joueur type 2eme ligne": ["2eme ligne gauche", "2eme ligne droit", "2ème ligne gauche", "2ème ligne droit", "Deuxième ligne"],
+        "Joueur type 3eme ligne": ["3eme ligne", "3ème ligne", "3eme ligne centre", "3ème ligne centre"],
+        "Joueur type demi de melee": ["Demi de mêlée", "Demi de melee"],
+        "Joueur type demi d'ouverture": ["Demi d'ouverture", "Ouverture"],
+        "Joueur type ailier": ["Ailier", "Ailiers"],
+        "Joueur type centre": ["Centre", "Centres"],
+        "Joueur type arriere": ["Arrière", "Arriere"]
     }
 
     for nom_type, postes in postes_groupes.items():
@@ -167,6 +167,13 @@ selected_stats = st.multiselect(
     default=stat_cols[:5] if len(stat_cols) > 5 else stat_cols
 )
 
+# Contrôles d'affichage du radar
+c1, c2 = st.columns([1, 2])
+with c1:
+    fullscreen = st.toggle("🖥️ Plein écran", value=False, help="Agrandit le radar dans la page")
+with c2:
+    zoom_pct = st.slider("🔍 Zoom radial (%)", 50, 300, 100, 5, help="Ajuste la portée de l'axe radial")
+
 if selected_stats and not selected_players.empty:
     radar_data = []
     for _, joueur in selected_players.iterrows():
@@ -193,15 +200,27 @@ if selected_stats and not selected_players.empty:
         markers=True
     )
     fig.update_traces(fill="toself", mode="lines+markers")
-    fig.update_layout(hovermode="closest", width=800, height=600, polar=dict(radialaxis=dict(showticklabels=True)))
 
-    # Affichage avec zoom et plein écran
+    # Taille & zoom
+    base_height = 600 if not fullscreen else 900
+    base_width = 800 if not fullscreen else None  # None => suit la largeur du container
+
+    # Détermine la portée radiale en fonction du zoom choisi
+    if len(radar_df_melt["Valeur"].dropna()) > 0:
+        base_max = float(np.nanmax(radar_df_melt["Valeur"]))
+        radial_max = max(1.0, base_max * (zoom_pct / 100.0))
+        fig.update_layout(polar=dict(radialaxis=dict(range=[0, radial_max], showticklabels=True)))
+
+    fig.update_layout(hovermode="closest", width=base_width, height=base_height)
+
+    # Affichage avec zoom molette & plein écran via modebar Plotly
     st.plotly_chart(
         fig,
         use_container_width=True,
         config={
-            "scrollZoom": True,
+            "scrollZoom": True,        # molette pour zoomer (selon navigateur)
             "displaylogo": False,
+            "doubleClick": "reset",   # double-clic pour reset
         }
     )
 
