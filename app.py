@@ -88,6 +88,18 @@ st.title("🏉 Rugby Top14/Prod2 Players")
 # Charger les joueurs
 df = load_players()
 
+# Créer joueurs types (moyennes hors joueurs à 0 match)
+df_nonzero = df[df['nombre_matchs_joues'] > 0]
+top14_avg = df_nonzero[df_nonzero['club'].str.contains("Top14", case=False)].mean(numeric_only=True)
+prod2_avg = df_nonzero[df_nonzero['club'].str.contains("Prod2", case=False)].mean(numeric_only=True)
+
+joueur_type_top14 = {"nom": "Joueur type Top14", "club": "Top14", **top14_avg.to_dict()}
+joueur_type_prod2 = {"nom": "Joueur type ProD2", "club": "ProD2", **prod2_avg.to_dict()}
+
+# Fusionner dans df pour pouvoir sélectionner
+extra_df = pd.DataFrame([joueur_type_top14, joueur_type_prod2])
+df_extended = pd.concat([df, extra_df], ignore_index=True)
+
 # Téléchargement auto des photos manquantes
 with st.spinner("Vérification des photos manquantes..."):
     n_new = download_missing_photos(df)
@@ -96,40 +108,68 @@ with st.spinner("Vérification des photos manquantes..."):
     else:
         st.info("Toutes les photos sont déjà présentes 👍")
 
-# Sélection d'un joueur
-selected_name = st.selectbox("Choisir un joueur", df['nom'].sort_values().unique())
-joueur = df[df['nom'] == selected_name].iloc[0]
+# Sélection d'un ou plusieurs joueurs
+selected_names = st.multiselect("Choisir un ou plusieurs joueurs", df_extended['nom'].sort_values().unique(), default=[df_extended['nom'].sort_values().iloc[0]])
+selected_players = df_extended[df_extended['nom'].isin(selected_names)]
 
-# Affichage sécurisé de la photo
-photo_to_show = get_image_safe(joueur)
-st.image(photo_to_show, caption=joueur['club'], width=200)
+# Affichage des photos et infos (uniquement pour vrais joueurs)
+for _, joueur in selected_players.iterrows():
+    if "Joueur type" not in joueur['nom']:
+        st.subheader(joueur['nom'])
+        photo_to_show = get_image_safe(joueur)
+        st.image(photo_to_show, caption=joueur['club'], width=150)
 
-st.subheader(joueur['nom'])
-
-st.write("Détails du joueur :")
-st.json({
-    "Club": joueur['club'],
-    "Poste": joueur['poste'],
-    "Âge": joueur['age'],
-    "Taille (cm)": joueur['taille_cm'],
-    "Poids (kg)": joueur['poids_kg'],
-    "Ratio poids/taille": joueur['ratio_poids_taille']
-})
+        st.json({
+            "Club": joueur['club'],
+            "Poste": joueur['poste'],
+            "Âge": joueur['age'],
+            "Taille (cm)": joueur['taille_cm'],
+            "Poids (kg)": joueur['poids_kg'],
+            "Ratio poids/taille": joueur['ratio_poids_taille']
+        })
+    else:
+        st.subheader(joueur['nom'])
+        st.info("📊 Joueur type basé sur la moyenne des stats.")
 
 # Radar chart des stats principales
-radar_stats = {
-    "Matchs joués": joueur['nombre_matchs_joues'],
-    "Temps de jeu (min)": joueur['temps_jeu_min'],
-    "Courses": joueur['courses'],
-    "Mètres parcourus": joueur['metres_parcourus'],
-    "Plaquages réussis": joueur['plaquages_reussis'],
+base_stats = {
+    "Matchs joués": "nombre_matchs_joues",
+    "Temps de jeu (min)": "temps_jeu_min",
+    "Courses": "courses",
+    "Mètres parcourus": "metres_parcourus",
+    "Plaquages réussis": "plaquages_reussis",
 }
 
-radar_df = pd.DataFrame({
-    "Stat": list(radar_stats.keys()),
-    "Valeur": list(radar_stats.values())
-})
+# Sélecteur de stats à afficher
+selected_stats = st.multiselect(
+    "Choisir les statistiques à afficher dans le radar",
+    options=list(base_stats.keys()),
+    default=list(base_stats.keys())
+)
 
-fig = px.line_polar(radar_df, r="Valeur", theta="Stat", line_close=True)
-fig.update_traces(fill="toself")
-st.plotly_chart(fig, use_container_width=True)
+if selected_stats and not selected_players.empty:
+    radar_data = []
+    for _, joueur in selected_players.iterrows():
+        radar_data.append({
+            "Joueur": joueur['nom'],
+            **{stat: joueur.get(base_stats[stat], np.nan) for stat in selected_stats}
+        })
+
+    radar_df = pd.DataFrame(radar_data)
+    radar_df_melt = radar_df.melt(id_vars="Joueur", value_vars=selected_stats, var_name="Stat", value_name="Valeur")
+
+    fig = px.line_polar(radar_df_melt, r="Valeur", theta="Stat", color="Joueur", line_close=True)
+    fig.update_traces(fill="toself")
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Tableau comparatif chiffré
+    st.subheader("📊 Tableau comparatif des joueurs")
+    table_df = radar_df.set_index("Joueur").T
+    st.dataframe(table_df)
+
+    # Export CSV / Excel
+    st.download_button("⬇️ Télécharger en CSV", table_df.to_csv().encode("utf-8"), file_name="comparatif_joueurs.csv", mime="text/csv")
+    st.download_button("⬇️ Télécharger en Excel", table_df.to_excel("comparatif_joueurs.xlsx"), file_name="comparatif_joueurs.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+else:
+    st.warning("Veuillez sélectionner au moins une statistique et un joueur pour afficher le radar.")
