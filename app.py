@@ -167,13 +167,6 @@ selected_stats = st.multiselect(
     default=stat_cols[:5] if len(stat_cols) > 5 else stat_cols
 )
 
-# Contrôles d'affichage du radar
-c1, c2 = st.columns([1, 2])
-with c1:
-    fullscreen = st.toggle("🖥️ Plein écran", value=False, help="Agrandit le radar dans la page")
-with c2:
-    zoom_pct = st.slider("🔍 Zoom radial (%)", 50, 300, 100, 5, help="Ajuste la portée de l'axe radial")
-
 if selected_stats and not selected_players.empty:
     radar_data = []
     for _, joueur in selected_players.iterrows():
@@ -201,26 +194,22 @@ if selected_stats and not selected_players.empty:
     )
     fig.update_traces(fill="toself", mode="lines+markers")
 
-    # Taille & zoom
-    base_height = 600 if not fullscreen else 900
-    base_width = 800 if not fullscreen else None  # None => suit la largeur du container
+    fig.update_layout(
+        hovermode="closest",
+        width=800,
+        height=600,
+        dragmode="pan"  # permet le déplacement du radar après zoom
+    )
 
-    # Détermine la portée radiale en fonction du zoom choisi
-    if len(radar_df_melt["Valeur"].dropna()) > 0:
-        base_max = float(np.nanmax(radar_df_melt["Valeur"]))
-        radial_max = max(1.0, base_max * (zoom_pct / 100.0))
-        fig.update_layout(polar=dict(radialaxis=dict(range=[0, radial_max], showticklabels=True)))
-
-    fig.update_layout(hovermode="closest", width=base_width, height=base_height)
-
-    # Affichage avec zoom molette & plein écran via modebar Plotly
+    # Affichage avec zoom type image + plein écran
     st.plotly_chart(
         fig,
         use_container_width=True,
         config={
-            "scrollZoom": True,        # molette pour zoomer (selon navigateur)
+            "scrollZoom": True,          # molette pour zoom/dézoom comme une image
             "displaylogo": False,
-            "doubleClick": "reset",   # double-clic pour reset
+            "modeBarButtonsToAdd": ["zoom2d", "pan2d", "resetScale2d"],
+            "doubleClick": "reset"      # double-clic pour reset
         }
     )
 
