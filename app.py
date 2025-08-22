@@ -4,7 +4,7 @@ import requests
 import pandas as pd
 import numpy as np
 import streamlit as st
-import plotly.express as px
+import plotly.graph_objects as go
 from io import BytesIO
 
 DB_FILE = "top14_prod2_players.db"
@@ -76,6 +76,46 @@ def load_players():
 
 
 # -----------------------------------------------------------------
+# CUSTOM RADAR SCATTER
+# -----------------------------------------------------------------
+def make_scatter_radar(radar_df, selected_stats):
+    fig = go.Figure()
+
+    n_stats = len(selected_stats)
+    angles = np.linspace(0, 2*np.pi, n_stats, endpoint=False)
+
+    for _, row in radar_df.iterrows():
+        r_values = [row[stat] for stat in selected_stats]
+        # fermer le polygone
+        r_values += [r_values[0]]
+        theta = np.append(angles, angles[0])
+
+        x = [r*np.cos(t) for r, t in zip(r_values, theta)]
+        y = [r*np.sin(t) for r, t in zip(r_values, theta)]
+
+        fig.add_trace(go.Scatter(
+            x=x,
+            y=y,
+            mode="lines+markers",
+            name=row["Joueur"],
+            fill="toself",
+            text=selected_stats + [selected_stats[0]],
+            hovertemplate="<b>%{text}</b><br>Valeur: %{x}, %{y}<extra></extra>"
+        ))
+
+    fig.update_layout(
+        width=800,
+        height=600,
+        hovermode="closest",
+        dragmode="pan",
+        xaxis=dict(showgrid=False, zeroline=False, visible=False),
+        yaxis=dict(showgrid=False, zeroline=False, visible=False)
+    )
+
+    return fig
+
+
+# -----------------------------------------------------------------
 # MAIN APP
 # -----------------------------------------------------------------
 st.set_page_config(page_title="Rugby Top14/Prod2 Players", layout="wide")
@@ -95,7 +135,7 @@ if not df_nonzero.empty:
     extra_players.append({"nom": "Joueur type Top14", "club": "Top14", **top14_avg.to_dict()})
     extra_players.append({"nom": "Joueur type ProD2", "club": "ProD2", **prod2_avg.to_dict()})
 
-    # Joueurs types par poste (robuste sur quelques variantes d'intitulés)
+    # Joueurs types par poste
     postes_groupes = {
         "Joueur type Avant": ["Pilier gauche", "Pilier droit", "Talonneur", "Talonner"],
         "Joueur type 2eme ligne": ["2eme ligne gauche", "2eme ligne droit", "2ème ligne gauche", "2ème ligne droit", "Deuxième ligne"],
@@ -176,40 +216,16 @@ if selected_stats and not selected_players.empty:
         })
 
     radar_df = pd.DataFrame(radar_data)
-    radar_df_melt = radar_df.melt(id_vars="Joueur", value_vars=selected_stats, var_name="Stat", value_name="Valeur")
 
-    # Palette de couleurs distinctes
-    color_sequence = px.colors.qualitative.Set1 + px.colors.qualitative.Set2 + px.colors.qualitative.Set3
+    fig = make_scatter_radar(radar_df, selected_stats)
 
-    fig = px.line_polar(
-        radar_df_melt,
-        r="Valeur",
-        theta="Stat",
-        color="Joueur",
-        line_close=True,
-        color_discrete_sequence=color_sequence,
-        hover_name="Stat",
-        hover_data={"Valeur": ":.2f", "Joueur": True},
-        markers=True
-    )
-    fig.update_traces(fill="toself", mode="lines+markers")
-
-    fig.update_layout(
-        hovermode="closest",
-        width=800,
-        height=600,
-        dragmode="pan"  # permet le déplacement du radar après zoom
-    )
-
-    # Affichage avec zoom type image + plein écran
     st.plotly_chart(
         fig,
         use_container_width=True,
         config={
-            "scrollZoom": True,          # molette pour zoom/dézoom comme une image
+            "scrollZoom": True,   # zoom/dézoom molette
             "displaylogo": False,
-            "modeBarButtonsToAdd": ["zoom2d", "pan2d", "resetScale2d"],
-            "doubleClick": "reset"      # double-clic pour reset
+            "doubleClick": "reset"  # reset avec double clic
         }
     )
 
