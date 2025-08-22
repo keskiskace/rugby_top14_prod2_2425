@@ -89,7 +89,7 @@ def make_scatter_radar(radar_df, selected_stats):
     n_circles = 5
     step = max_val / n_circles if max_val > 0 else 1
 
-    # Ajouter cercles concentriques
+    # Ajouter cercles concentriques + valeurs sur un axe (à droite)
     for i in range(1, n_circles+1):
         r = step * i
         circle_x = [r*np.cos(t) for t in np.linspace(0, 2*np.pi, 200)]
@@ -102,6 +102,14 @@ def make_scatter_radar(radar_df, selected_stats):
             showlegend=False,
             hoverinfo="skip"
         ))
+        # Valeur numérique sur l'axe des x positifs uniquement
+        fig.add_annotation(
+            x=r,
+            y=0,
+            text=str(round(r,1)),
+            showarrow=False,
+            font=dict(size=10, color="grey")
+        )
 
     # Ajouter axes radiaux et labels
     for angle, stat in zip(angles, selected_stats):
@@ -133,14 +141,17 @@ def make_scatter_radar(radar_df, selected_stats):
         x = [r*np.cos(t) for r, t in zip(r_values, theta)]
         y = [r*np.sin(t) for r, t in zip(r_values, theta)]
 
+        hover_texts = [f"{stat}: {round(val,1)}" for stat, val in zip(selected_stats, r_values[:-1])]
+        hover_texts.append(hover_texts[0])
+
         fig.add_trace(go.Scatter(
             x=x,
             y=y,
             mode="lines+markers",
             name=row["Joueur"],
             fill="toself",
-            text=selected_stats + [selected_stats[0]],
-            hovertemplate="<b>%{text}</b><br>Valeur: %{x}, %{y}<extra></extra>"
+            text=hover_texts,
+            hovertemplate="%{text}<extra></extra>"
         ))
 
     fig.update_layout(
@@ -170,8 +181,8 @@ extra_players = []
 
 if not df_nonzero.empty:
     # Joueurs types Top14 et ProD2
-    top14_avg = df_nonzero[df_nonzero['club'].str.contains("Top14", case=False, na=False)].mean(numeric_only=True)
-    prod2_avg = df_nonzero[df_nonzero['club'].str.contains("Prod2", case=False, na=False)].mean(numeric_only=True)
+    top14_avg = df_nonzero[df_nonzero['club'].str.contains("Top14", case=False, na=False)].mean(numeric_only=True).round(1)
+    prod2_avg = df_nonzero[df_nonzero['club'].str.contains("Prod2", case=False, na=False)].mean(numeric_only=True).round(1)
     extra_players.append({"nom": "Joueur type Top14", "club": "Top14", **top14_avg.to_dict()})
     extra_players.append({"nom": "Joueur type ProD2", "club": "ProD2", **prod2_avg.to_dict()})
 
@@ -190,7 +201,7 @@ if not df_nonzero.empty:
     for nom_type, postes in postes_groupes.items():
         subset = df_nonzero[df_nonzero['poste'].isin(postes)]
         if not subset.empty:
-            avg_stats = subset.mean(numeric_only=True)
+            avg_stats = subset.mean(numeric_only=True).round(1)
             extra_players.append({"nom": nom_type, "club": "Poste moyen", **avg_stats.to_dict()})
 
 extra_df = pd.DataFrame(extra_players) if extra_players else pd.DataFrame()
