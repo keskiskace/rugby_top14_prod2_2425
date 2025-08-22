@@ -89,6 +89,13 @@ def make_scatter_radar(radar_df, selected_stats):
     n_circles = 5
     step = max_val / n_circles if max_val > 0 else 1
 
+    # Palette de couleurs distinctes
+    color_palette = [
+        "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+        "#9467bd", "#8c564b", "#e377c2", "#7f7f7f",
+        "#bcbd22", "#17becf"
+    ]
+
     # Ajouter cercles concentriques + valeurs sur un axe (à droite)
     for i in range(1, n_circles+1):
         r = step * i
@@ -132,8 +139,8 @@ def make_scatter_radar(radar_df, selected_stats):
             font=dict(size=12, color="black")
         )
 
-    # Tracer les joueurs
-    for _, row in radar_df.iterrows():
+    # Tracer les joueurs avec couleurs distinctes
+    for idx, (_, row) in enumerate(radar_df.iterrows()):
         r_values = [row[stat] for stat in selected_stats]
         r_values += [r_values[0]]
         theta = np.append(angles, angles[0])
@@ -144,6 +151,8 @@ def make_scatter_radar(radar_df, selected_stats):
         hover_texts = [f"{stat}: {round(val,1)}" for stat, val in zip(selected_stats, r_values[:-1])]
         hover_texts.append(hover_texts[0])
 
+        color = color_palette[idx % len(color_palette)]
+
         fig.add_trace(go.Scatter(
             x=x,
             y=y,
@@ -151,7 +160,9 @@ def make_scatter_radar(radar_df, selected_stats):
             name=row["Joueur"],
             fill="toself",
             text=hover_texts,
-            hovertemplate="%{text}<extra></extra>"
+            hovertemplate="%{text}<extra></extra>",
+            line=dict(color=color),
+            marker=dict(color=color)
         ))
 
     fig.update_layout(
