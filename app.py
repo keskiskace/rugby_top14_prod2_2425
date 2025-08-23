@@ -106,7 +106,7 @@ def make_scatter_radar(radar_df, selected_stats):
     angles = np.linspace(0, 2*np.pi, n_stats, endpoint=False)
 
     # Déterminer le max global pour la grille
-    max_val = pd.to_numeric(radar_df[selected_stats], errors='coerce').max().max()
+    max_val = radar_df[selected_stats].apply(pd.to_numeric, errors="coerce").max().max()
     if not np.isfinite(max_val) or max_val <= 0:
         max_val = 1.0
     n_circles = 5
