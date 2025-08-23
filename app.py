@@ -7,7 +7,7 @@ import streamlit as st
 import plotly.graph_objects as go
 from io import BytesIO
 
-DB_FILE = "top14_prod2_players.db"
+DB_FILE = "top14_prod2_24_25_players.db"
 TABLE = "players"
 
 # -----------------------------------------------------------------
@@ -352,3 +352,4 @@ if selected_stats and not selected_players.empty:
 
 else:
     st.warning("Veuillez sélectionner au moins une statistique et un joueur pour afficher le radar.")
+
