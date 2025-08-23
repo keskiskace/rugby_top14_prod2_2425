@@ -83,26 +83,15 @@ def load_players():
 
 
 # -----------------------------------------------------------------
-# HELPERS: LEAGUE INFERENCE
+# LEAGUE COLUMN
 # -----------------------------------------------------------------
 
 def infer_league(df: pd.DataFrame) -> pd.DataFrame:
-    """Ajoute une colonne '__league__' en détectant Top14 / ProD2 dans les colonnes texte."""
     df = df.copy()
-    preferred_cols = [c for c in ["league", "ligue", "division", "competition", "championnat"] if c in df.columns]
-    if preferred_cols:
-        s = df[preferred_cols[0]].astype(str).str.lower()
+    if "division" in df.columns:
+        df["__league__"] = df["division"].astype(str)
     else:
-        text_cols = df.select_dtypes(include=["object"]).columns.tolist()
-        if not text_cols:
-            df["__league__"] = np.nan
-            return df
-        s = df[text_cols].astype(str).apply(lambda r: " ".join(r.values).lower(), axis=1)
-
-    top14_mask = s.str.contains(r"top\s*14", regex=True, na=False)
-    prod2_mask = s.str.contains(r"(pro\s*-?\s*d\s*2|prod\s*2|prod2)", regex=True, na=False)
-
-    df["__league__"] = np.where(top14_mask, "Top14", np.where(prod2_mask, "ProD2", np.nan))
+        df["__league__"] = None
     return df
 
 
@@ -228,32 +217,25 @@ if 'nombre_matchs_joues' in df.columns:
 else:
     df_nonzero = df.copy()
 
-# Déterminer la ligue (Top14 / ProD2)
+# Déterminer la ligue avec la colonne division
 df_labeled = infer_league(df_nonzero)
 
 # Construire les joueurs types
 extra_players = []
-missing_top14 = False
-missing_prod2 = False
 
-# Joueurs types Top14 et ProD2 à partir des étiquettes détectées
 if not df_labeled.empty and '__league__' in df_labeled.columns:
-    top14_mask = df_labeled['__league__'].eq('Top14')
-    prod2_mask = df_labeled['__league__'].eq('ProD2')
+    top14_mask = df_labeled['__league__'].str.contains("Top14", case=False, na=False)
+    prod2_mask = df_labeled['__league__'].str.contains("ProD2", case=False, na=False)
 
     if top14_mask.any():
         top14_avg = df_labeled[top14_mask].mean(numeric_only=True).round(1)
         extra_players.append({"nom": "Joueur type Top14", "club": "Top14", **top14_avg.to_dict()})
-    else:
-        missing_top14 = True
 
     if prod2_mask.any():
         prod2_avg = df_labeled[prod2_mask].mean(numeric_only=True).round(1)
         extra_players.append({"nom": "Joueur type ProD2", "club": "ProD2", **prod2_avg.to_dict()})
-    else:
-        missing_prod2 = True
 
-# Joueurs types par poste (toujours sur joueurs avec >0 match)
+# Joueurs types par poste
 postes_groupes = {
     "Joueur type Avant": ["Pilier gauche", "Pilier droit", "Talonneur", "Talonner"],
     "Joueur type 2eme ligne": ["2eme ligne gauche", "2eme ligne droit", "2ème ligne gauche", "2ème ligne droit", "Deuxième ligne"],
@@ -275,15 +257,6 @@ for nom_type, postes in postes_groupes.items():
 extra_df = pd.DataFrame(extra_players) if extra_players else pd.DataFrame()
 
 df_extended = pd.concat([df, extra_df], ignore_index=True) if not extra_df.empty else df.copy()
-
-# Infos si on n'a pas pu détecter la ligue
-if missing_top14 or missing_prod2:
-    with st.expander("ℹ️ Info détection ligue"):
-        if missing_top14:
-            st.warning("Impossible de détecter des joueurs Top14 dans les colonnes texte (Top 14).")
-        if missing_prod2:
-            st.warning("Impossible de détecter des joueurs ProD2 dans les colonnes texte (Pro D2 / Prod2).")
-        st.write("Assure-toi qu'une colonne texte contient 'Top 14' ou 'Pro D2/Prod2' (ex: competition/ligue).")
 
 # Téléchargement auto des photos manquantes
 with st.spinner("Vérification des photos manquantes..."):
