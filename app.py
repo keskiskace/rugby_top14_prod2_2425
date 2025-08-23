@@ -13,6 +13,7 @@ TABLE = "players"
 # -----------------------------------------------------------------
 # IMAGE MANAGEMENT
 # -----------------------------------------------------------------
+
 def get_image_safe(player):
     fallback = "images/no_player.webp"
     img_path = f"images/photo_{player['player_id']}.jpg"
@@ -20,7 +21,7 @@ def get_image_safe(player):
     if os.path.exists(img_path):
         return img_path
 
-    if isinstance(player['photo'], str) and player['photo'].startswith("http"):
+    if isinstance(player.get('photo', ''), str) and player.get('photo', '').startswith("http"):
         try:
             r = requests.get(player['photo'], timeout=5)
             r.raise_for_status()
@@ -35,8 +36,8 @@ def download_missing_photos(df, img_dir="images"):
     os.makedirs(img_dir, exist_ok=True)
     missing_count = 0
     for _, row in df.iterrows():
-        player_id = row["player_id"]
-        url = row["photo"]
+        player_id = row.get("player_id")
+        url = row.get("photo")
         if not url or pd.isna(url):
             continue
         img_path = os.path.join(img_dir, f"photo_{player_id}.jpg")
@@ -48,7 +49,7 @@ def download_missing_photos(df, img_dir="images"):
                     f.write(r.content)
                 missing_count += 1
             except Exception as e:
-                print(f"[ERREUR] {row['nom']} ({url}) : {e}")
+                print(f"[ERREUR] {row.get('nom','?')} ({url}) : {e}")
     return missing_count
 
 
@@ -64,20 +65,51 @@ def load_players():
     for col in df.columns:
         df[col] = pd.to_numeric(df[col], errors='ignore')
 
-    # Ratios
+    # Ratios utiles
     if "poids_kg" in df.columns and "taille_cm" in df.columns:
-        df['ratio_poids_taille'] = (pd.to_numeric(df['poids_kg'], errors='coerce') / pd.to_numeric(df['taille_cm'], errors='coerce')).replace([np.inf, -np.inf], np.nan).round(2)
+        df['ratio_poids_taille'] = (
+            pd.to_numeric(df['poids_kg'], errors='coerce') / pd.to_numeric(df['taille_cm'], errors='coerce')
+        ).replace([np.inf, -np.inf], np.nan).round(2)
     if "metres_parcourus" in df.columns and "courses" in df.columns:
-        df['ratio_metres_courses'] = (pd.to_numeric(df['metres_parcourus'], errors='coerce') / pd.to_numeric(df['courses'], errors='coerce')).replace([np.inf, -np.inf], np.nan).round(2)
+        df['ratio_metres_courses'] = (
+            pd.to_numeric(df['metres_parcourus'], errors='coerce') / pd.to_numeric(df['courses'], errors='coerce')
+        ).replace([np.inf, -np.inf], np.nan).round(2)
     if "temps_jeu_min" in df.columns and "nombre_matchs_joues" in df.columns:
-        df['ratio_min_matchs'] = (pd.to_numeric(df['temps_jeu_min'], errors='coerce') / pd.to_numeric(df['nombre_matchs_joues'], errors='coerce')).replace([np.inf, -np.inf], np.nan).round(2)
+        df['ratio_min_matchs'] = (
+            pd.to_numeric(df['temps_jeu_min'], errors='coerce') / pd.to_numeric(df['nombre_matchs_joues'], errors='coerce')
+        ).replace([np.inf, -np.inf], np.nan).round(2)
 
+    return df
+
+
+# -----------------------------------------------------------------
+# HELPERS: LEAGUE INFERENCE
+# -----------------------------------------------------------------
+
+def infer_league(df: pd.DataFrame) -> pd.DataFrame:
+    """Ajoute une colonne '__league__' en détectant Top14 / ProD2 dans les colonnes texte."""
+    df = df.copy()
+    preferred_cols = [c for c in ["league", "ligue", "division", "competition", "championnat"] if c in df.columns]
+    if preferred_cols:
+        s = df[preferred_cols[0]].astype(str).str.lower()
+    else:
+        text_cols = df.select_dtypes(include=["object"]).columns.tolist()
+        if not text_cols:
+            df["__league__"] = np.nan
+            return df
+        s = df[text_cols].astype(str).apply(lambda r: " ".join(r.values).lower(), axis=1)
+
+    top14_mask = s.str.contains(r"top\s*14", regex=True, na=False)
+    prod2_mask = s.str.contains(r"(pro\s*-?\s*d\s*2|prod\s*2|prod2)", regex=True, na=False)
+
+    df["__league__"] = np.where(top14_mask, "Top14", np.where(prod2_mask, "ProD2", np.nan))
     return df
 
 
 # -----------------------------------------------------------------
 # CUSTOM RADAR SCATTER WITH GRID
 # -----------------------------------------------------------------
+
 def make_scatter_radar(radar_df, selected_stats):
     fig = go.Figure()
 
@@ -85,9 +117,11 @@ def make_scatter_radar(radar_df, selected_stats):
     angles = np.linspace(0, 2*np.pi, n_stats, endpoint=False)
 
     # Déterminer le max global pour la grille
-    max_val = radar_df[selected_stats].max().max()
+    max_val = pd.to_numeric(radar_df[selected_stats], errors='coerce').max().max()
+    if not np.isfinite(max_val) or max_val <= 0:
+        max_val = 1.0
     n_circles = 5
-    step = max_val / n_circles if max_val > 0 else 1
+    step = max_val / n_circles
 
     # Palette de couleurs distinctes
     color_palette = [
@@ -113,7 +147,7 @@ def make_scatter_radar(radar_df, selected_stats):
         fig.add_annotation(
             x=r,
             y=0,
-            text=str(round(r,1)),
+            text=str(round(r, 1)),
             showarrow=False,
             font=dict(size=10, color="grey")
         )
@@ -141,14 +175,15 @@ def make_scatter_radar(radar_df, selected_stats):
 
     # Tracer les joueurs avec couleurs distinctes
     for idx, (_, row) in enumerate(radar_df.iterrows()):
-        r_values = [row[stat] for stat in selected_stats]
+        r_values = [row.get(stat, np.nan) for stat in selected_stats]
+        r_values = [np.nan if (not pd.notna(v)) else float(v) for v in r_values]
         r_values += [r_values[0]]
         theta = np.append(angles, angles[0])
 
-        x = [r*np.cos(t) for r, t in zip(r_values, theta)]
-        y = [r*np.sin(t) for r, t in zip(r_values, theta)]
+        x = [0 if (v is np.nan or not np.isfinite(v)) else v*np.cos(t) for v, t in zip(r_values, theta)]
+        y = [0 if (v is np.nan or not np.isfinite(v)) else v*np.sin(t) for v, t in zip(r_values, theta)]
 
-        hover_texts = [f"{stat}: {round(val,1)}" for stat, val in zip(selected_stats, r_values[:-1])]
+        hover_texts = [f"{stat}: {'' if (val is np.nan or not np.isfinite(val)) else round(val, 1)}" for stat, val in zip(selected_stats, r_values[:-1])]
         hover_texts.append(hover_texts[0])
 
         color = color_palette[idx % len(color_palette)]
@@ -180,36 +215,58 @@ def make_scatter_radar(radar_df, selected_stats):
 # -----------------------------------------------------------------
 # MAIN APP
 # -----------------------------------------------------------------
+
 st.set_page_config(page_title="Rugby Top14/Prod2 Players", layout="wide")
 st.title("🏉 Rugby Top14/Prod2 Players")
 
 # Charger les joueurs
 df = load_players()
 
-# Créer joueurs types (moyennes hors joueurs à 0 match)
-df_nonzero = df[df.get('nombre_matchs_joues', 0) > 0]
+# Filtrer les joueurs avec au moins 1 match (si la colonne existe)
+if 'nombre_matchs_joues' in df.columns:
+    df_nonzero = df[pd.to_numeric(df['nombre_matchs_joues'], errors='coerce').fillna(0) > 0].copy()
+else:
+    df_nonzero = df.copy()
+
+# Déterminer la ligue (Top14 / ProD2)
+df_labeled = infer_league(df_nonzero)
+
+# Construire les joueurs types
 extra_players = []
+missing_top14 = False
+missing_prod2 = False
 
-if not df_nonzero.empty:
-    # Joueurs types Top14 et ProD2
-    top14_avg = df_nonzero[df_nonzero['club'].str.contains("Top14", case=False, na=False)].mean(numeric_only=True).round(1)
-    prod2_avg = df_nonzero[df_nonzero['club'].str.contains("Prod2", case=False, na=False)].mean(numeric_only=True).round(1)
-    extra_players.append({"nom": "Joueur type Top14", "club": "Top14", **top14_avg.to_dict()})
-    extra_players.append({"nom": "Joueur type ProD2", "club": "ProD2", **prod2_avg.to_dict()})
+# Joueurs types Top14 et ProD2 à partir des étiquettes détectées
+if not df_labeled.empty and '__league__' in df_labeled.columns:
+    top14_mask = df_labeled['__league__'].eq('Top14')
+    prod2_mask = df_labeled['__league__'].eq('ProD2')
 
-    # Joueurs types par poste
-    postes_groupes = {
-        "Joueur type Avant": ["Pilier gauche", "Pilier droit", "Talonneur", "Talonner"],
-        "Joueur type 2eme ligne": ["2eme ligne gauche", "2eme ligne droit", "2ème ligne gauche", "2ème ligne droit", "Deuxième ligne"],
-        "Joueur type 3eme ligne": ["3eme ligne", "3ème ligne", "3eme ligne centre", "3ème ligne centre"],
-        "Joueur type demi de melee": ["Demi de mêlée", "Demi de melee"],
-        "Joueur type demi d'ouverture": ["Demi d'ouverture", "Ouverture"],
-        "Joueur type ailier": ["Ailier", "Ailiers"],
-        "Joueur type centre": ["Centre", "Centres"],
-        "Joueur type arriere": ["Arrière", "Arriere"]
-    }
+    if top14_mask.any():
+        top14_avg = df_labeled[top14_mask].mean(numeric_only=True).round(1)
+        extra_players.append({"nom": "Joueur type Top14", "club": "Top14", **top14_avg.to_dict()})
+    else:
+        missing_top14 = True
 
-    for nom_type, postes in postes_groupes.items():
+    if prod2_mask.any():
+        prod2_avg = df_labeled[prod2_mask].mean(numeric_only=True).round(1)
+        extra_players.append({"nom": "Joueur type ProD2", "club": "ProD2", **prod2_avg.to_dict()})
+    else:
+        missing_prod2 = True
+
+# Joueurs types par poste (toujours sur joueurs avec >0 match)
+postes_groupes = {
+    "Joueur type Avant": ["Pilier gauche", "Pilier droit", "Talonneur", "Talonner"],
+    "Joueur type 2eme ligne": ["2eme ligne gauche", "2eme ligne droit", "2ème ligne gauche", "2ème ligne droit", "Deuxième ligne"],
+    "Joueur type 3eme ligne": ["3eme ligne", "3ème ligne", "3eme ligne centre", "3ème ligne centre"],
+    "Joueur type demi de melee": ["Demi de mêlée", "Demi de melee"],
+    "Joueur type demi d'ouverture": ["Demi d'ouverture", "Ouverture"],
+    "Joueur type ailier": ["Ailier", "Ailiers"],
+    "Joueur type centre": ["Centre", "Centres"],
+    "Joueur type arriere": ["Arrière", "Arriere"]
+}
+
+for nom_type, postes in postes_groupes.items():
+    if 'poste' in df_nonzero.columns:
         subset = df_nonzero[df_nonzero['poste'].isin(postes)]
         if not subset.empty:
             avg_stats = subset.mean(numeric_only=True).round(1)
@@ -218,6 +275,15 @@ if not df_nonzero.empty:
 extra_df = pd.DataFrame(extra_players) if extra_players else pd.DataFrame()
 
 df_extended = pd.concat([df, extra_df], ignore_index=True) if not extra_df.empty else df.copy()
+
+# Infos si on n'a pas pu détecter la ligue
+if missing_top14 or missing_prod2:
+    with st.expander("ℹ️ Info détection ligue"):
+        if missing_top14:
+            st.warning("Impossible de détecter des joueurs Top14 dans les colonnes texte (Top 14).")
+        if missing_prod2:
+            st.warning("Impossible de détecter des joueurs ProD2 dans les colonnes texte (Pro D2 / Prod2).")
+        st.write("Assure-toi qu'une colonne texte contient 'Top 14' ou 'Pro D2/Prod2' (ex: competition/ligue).")
 
 # Téléchargement auto des photos manquantes
 with st.spinner("Vérification des photos manquantes..."):
@@ -228,11 +294,18 @@ with st.spinner("Vérification des photos manquantes..."):
         st.info("Toutes les photos sont déjà présentes 👍")
 
 # Sélection des vrais joueurs
-selected_names = st.multiselect("Choisir un ou plusieurs joueurs", df['nom'].sort_values().unique(), default=[df['nom'].sort_values().iloc[0]])
+selected_names = st.multiselect(
+    "Choisir un ou plusieurs joueurs",
+    df['nom'].sort_values().unique(),
+    default=[df['nom'].sort_values().iloc[0]] if len(df) else []
+)
 selected_players = df[df['nom'].isin(selected_names)]
 
 # Sélection des joueurs types
-selected_types = st.multiselect("Choisir un ou plusieurs joueurs types", extra_df['nom'].sort_values().unique() if not extra_df.empty else [])
+selected_types = st.multiselect(
+    "Choisir un ou plusieurs joueurs types",
+    extra_df['nom'].sort_values().unique() if not extra_df.empty else []
+)
 selected_type_players = extra_df[extra_df['nom'].isin(selected_types)] if not extra_df.empty else pd.DataFrame()
 
 # Concaténer la sélection
@@ -240,13 +313,13 @@ selected_players = pd.concat([selected_players, selected_type_players], ignore_i
 
 # Affichage des infos
 for _, joueur in selected_players.iterrows():
-    if "Joueur type" not in joueur['nom']:
-        st.subheader(joueur['nom'])
+    if "Joueur type" not in str(joueur.get('nom', '')):
+        st.subheader(joueur.get('nom', ''))
         photo_to_show = get_image_safe(joueur)
-        st.image(photo_to_show, caption=joueur['club'], width=150)
+        st.image(photo_to_show, caption=joueur.get('club', ''), width=150)
 
         st.json({
-            "Club": joueur['club'],
+            "Club": joueur.get('club', 'N/A'),
             "Poste": joueur.get('poste', 'N/A'),
             "Âge": joueur.get('age', 'N/A'),
             "Taille (cm)": joueur.get('taille_cm', 'N/A'),
@@ -254,7 +327,7 @@ for _, joueur in selected_players.iterrows():
             "Ratio poids/taille": joueur.get('ratio_poids_taille', 'N/A')
         })
     else:
-        st.subheader(joueur['nom'])
+        st.subheader(joueur.get('nom', ''))
         st.info("📊 Joueur type basé sur la moyenne des stats.")
 
 # Colonnes numériques disponibles
@@ -273,7 +346,7 @@ if selected_stats and not selected_players.empty:
     radar_data = []
     for _, joueur in selected_players.iterrows():
         radar_data.append({
-            "Joueur": joueur['nom'],
+            "Joueur": joueur.get('nom', ''),
             **{stat: joueur.get(stat, np.nan) for stat in selected_stats}
         })
 
@@ -291,13 +364,18 @@ if selected_stats and not selected_players.empty:
         }
     )
 
-    # Tableau comparatif chiffré
+    # Tableau comparatif chifré
     st.subheader("📊 Tableau comparatif des joueurs")
     table_df = radar_df.set_index("Joueur").T
     st.dataframe(table_df)
 
     # Export CSV uniquement
-    st.download_button("⬇️ Télécharger en CSV", table_df.to_csv().encode("utf-8"), file_name="comparatif_joueurs.csv", mime="text/csv")
+    st.download_button(
+        "⬇️ Télécharger en CSV",
+        table_df.to_csv().encode("utf-8"),
+        file_name="comparatif_joueurs.csv",
+        mime="text/csv"
+    )
 
 else:
     st.warning("Veuillez sélectionner au moins une statistique et un joueur pour afficher le radar.")
