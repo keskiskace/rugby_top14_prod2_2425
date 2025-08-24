@@ -366,59 +366,24 @@ st.header("📊 Comparaison des Clubs")
 with sqlite3.connect(DB_FILE) as con:
     clubs_df = pd.read_sql("SELECT * FROM clubs", con)
 
+# Exclure clubs qui n'ont pas joué (0 points marqués)
+clubs_nonzero = clubs_df[pd.to_numeric(clubs_df['points_marqués'], errors='coerce').fillna(0) > 0].copy()
+
+# Créer club type Top14 et ProD2
+extra_clubs = []
+if not clubs_nonzero.empty:
+    if (clubs_nonzero['division'].str.contains("Top14", case=False, na=False)).any():
+        avg_top14 = clubs_nonzero[clubs_nonzero['division'].str.contains("Top14", case=False, na=False)].mean(numeric_only=True).round(1)
+        extra_clubs.append({"club": "Club type Top14", **avg_top14.to_dict()})
+    if (clubs_nonzero['division'].str.contains("ProD2", case=False, na=False)).any():
+        avg_prod2 = clubs_nonzero[clubs_nonzero['division'].str.contains("ProD2", case=False, na=False)].mean(numeric_only=True).round(1)
+        extra_clubs.append({"club": "Club type ProD2", **avg_prod2.to_dict()})
+
+extra_clubs_df = pd.DataFrame(extra_clubs) if extra_clubs else pd.DataFrame()
+
+clubs_extended = pd.concat([clubs_df, extra_clubs_df], ignore_index=True) if not extra_clubs_df.empty else clubs_df.copy()
+
 # Sélection des clubs
 selected_clubs = st.multiselect(
     "Choisir un ou plusieurs clubs",
-    clubs_df['club'].sort_values().unique(),
-    default=[clubs_df['club'].sort_values().iloc[0]] if len(clubs_df) else []
-)
-
-selected_clubs_df = clubs_df[clubs_df['club'].isin(selected_clubs)]
-
-# Colonnes numériques disponibles (clubs)
-numeric_club_cols = clubs_df.select_dtypes(include=[np.number]).columns.tolist()
-stat_club_cols = [c for c in numeric_club_cols if c not in ["classement"]]
-
-# Sélection dynamique des stats (clubs)
-selected_club_stats = st.multiselect(
-    "Choisir les statistiques à afficher dans le radar (clubs)",
-    options=stat_club_cols,
-    default=stat_club_cols[:5] if len(stat_club_cols) > 5 else stat_club_cols
-)
-
-if not selected_clubs_df.empty and selected_club_stats:
-    radar_club_data = []
-    for _, club in selected_clubs_df.iterrows():
-        radar_club_data.append({
-            "Joueur": club.get('club', ''),  # on réutilise la clé "Joueur" pour la fonction radar
-            **{stat: club.get(stat, np.nan) for stat in selected_club_stats}
-        })
-
-    radar_clubs_df = pd.DataFrame(radar_club_data)
-
-    fig_clubs = make_scatter_radar(radar_clubs_df, selected_club_stats)
-
-    st.plotly_chart(
-        fig_clubs,
-        use_container_width=True,
-        config={
-            "scrollZoom": True,
-            "displaylogo": False,
-            "doubleClick": "reset"
-        }
-    )
-
-    # Tableau comparatif chiffré (clubs)
-    st.subheader("📊 Tableau comparatif des clubs")
-    table_clubs_df = radar_clubs_df.set_index("Joueur").T
-    st.dataframe(table_clubs_df)
-
-    # Export CSV (clubs)
-    st.download_button(
-        "⬇️ Télécharger en CSV (clubs)",
-        table_clubs_df.to_csv().encode("utf-8"),
-        file_name="comparatif_clubs.csv",
-        mime="text/csv"
-    )
-else:
-    st.warning("Veuillez sélectionner au moins un club et une statistique pour afficher le radar.")
+    clubs
