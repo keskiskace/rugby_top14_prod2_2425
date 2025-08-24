@@ -7,7 +7,7 @@ import streamlit as st
 import plotly.express as px
 from io import BytesIO
 
-DB_FILE = "top14_prod2_players.db"
+DB_FILE = "top14_prod2_players_clubs.db"
 TABLE = "players"
 
 # -----------------------------------------------------------------
@@ -247,3 +247,4 @@ if not selected_clubs_df.empty and selected_club_stats:
     )
 else:
     st.warning("Veuillez sélectionner au moins un club et une statistique pour afficher le radar.")
+
