@@ -386,4 +386,70 @@ clubs_extended = pd.concat([clubs_df, extra_clubs_df], ignore_index=True) if not
 # Sélection des clubs
 selected_clubs = st.multiselect(
     "Choisir un ou plusieurs clubs",
-    clubs
+    clubs_extended['club'].sort_values().unique(),
+    default=[clubs_extended['club'].sort_values().iloc[0]] if len(clubs_extended) else []
+)
+
+selected_clubs_df = clubs_extended[clubs_extended['club'].isin(selected_clubs)]
+
+# Affichage des logos en ligne "Club1 VS Club2 VS Club3..."
+if not selected_clubs_df.empty:
+    logos = []
+    for _, club in selected_clubs_df.iterrows():
+        if "http" in str(club.get("logo", "")):
+            logos.append(f"<img src='{club['logo']}' width='60'>")
+        else:
+            logos.append(club.get("club", ""))
+    logos_html = " <b>VS</b> ".join(logos)
+    st.markdown(f"<div style='text-align:center;'>{logos_html}</div>", unsafe_allow_html=True)
+
+# Colonnes numériques disponibles (clubs)
+numeric_cols_clubs = clubs_extended.select_dtypes(include=[np.number]).columns.tolist()
+exclude_cols_clubs = ["classement"]
+stat_cols_clubs = [c for c in numeric_cols_clubs if c not in exclude_cols_clubs]
+
+# Sélecteur de stats dynamiques (clubs)
+selected_stats_clubs = st.multiselect(
+    "Choisir les statistiques à afficher dans le radar (clubs)",
+    options=stat_cols_clubs,
+    default=stat_cols_clubs[:5] if len(stat_cols_clubs) > 5 else stat_cols_clubs
+)
+
+if selected_stats_clubs and not selected_clubs_df.empty:
+    radar_data = []
+    for _, club in selected_clubs_df.iterrows():
+        radar_data.append({
+            "Joueur": club.get("club", ""),
+            **{stat: club.get(stat, np.nan) for stat in selected_stats_clubs}
+        })
+
+    radar_df = pd.DataFrame(radar_data)
+
+    fig = make_scatter_radar(radar_df, selected_stats_clubs)
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={
+            "scrollZoom": True,
+            "displaylogo": False,
+            "doubleClick": "reset"
+        }
+    )
+
+    # Tableau comparatif chiffré
+    st.subheader("📊 Tableau comparatif des clubs")
+    table_df = radar_df.set_index("Joueur").T
+    st.dataframe(table_df)
+
+    # Export CSV
+    st.download_button(
+        "⬇️ Télécharger en CSV",
+        table_df.to_csv().encode("utf-8"),
+        file_name="comparatif_clubs.csv",
+        mime="text/csv"
+    )
+else:
+    st.warning("Veuillez sélectionner au moins une statistique et un club pour afficher le radar.")
+
+
