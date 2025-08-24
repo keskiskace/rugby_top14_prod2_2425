@@ -8,12 +8,12 @@ import plotly.graph_objects as go
 from io import BytesIO
 
 DB_FILE = "top14_prod2_24_25_players_clubs.db"
-TABLE = "players"
+TABLE_PLAYERS = "players"
+TABLE_CLUBS = "clubs"
 
 # -----------------------------------------------------------------
 # IMAGE MANAGEMENT
 # -----------------------------------------------------------------
-
 def get_image_safe(player):
     fallback = "images/no_player.webp"
     img_path = f"images/photo_{player['player_id']}.jpg"
@@ -21,7 +21,7 @@ def get_image_safe(player):
     if os.path.exists(img_path):
         return img_path
 
-    if isinstance(player.get('photo', ''), str) and player.get('photo', '').startswith("http"):
+    if isinstance(player['photo'], str) and player['photo'].startswith("http"):
         try:
             r = requests.get(player['photo'], timeout=5)
             r.raise_for_status()
@@ -36,8 +36,8 @@ def download_missing_photos(df, img_dir="images"):
     os.makedirs(img_dir, exist_ok=True)
     missing_count = 0
     for _, row in df.iterrows():
-        player_id = row.get("player_id")
-        url = row.get("photo")
+        player_id = row["player_id"]
+        url = row["photo"]
         if not url or pd.isna(url):
             continue
         img_path = os.path.join(img_dir, f"photo_{player_id}.jpg")
@@ -49,7 +49,7 @@ def download_missing_photos(df, img_dir="images"):
                     f.write(r.content)
                 missing_count += 1
             except Exception as e:
-                print(f"[ERREUR] {row.get('nom','?')} ({url}) : {e}")
+                print(f"[ERREUR] {row['nom']} ({url}) : {e}")
     return missing_count
 
 
@@ -59,45 +59,50 @@ def download_missing_photos(df, img_dir="images"):
 @st.cache_data
 def load_players():
     with sqlite3.connect(DB_FILE) as con:
-        df = pd.read_sql(f"SELECT * FROM {TABLE}", con)
+        df = pd.read_sql(f"SELECT * FROM {TABLE_PLAYERS}", con)
 
     # Conversion en numérique (si possible)
     for col in df.columns:
         df[col] = pd.to_numeric(df[col], errors='ignore')
 
-    # Ratios utiles
+    # Ratios
     if "poids_kg" in df.columns and "taille_cm" in df.columns:
         df['ratio_poids_taille'] = (
-            pd.to_numeric(df['poids_kg'], errors='coerce') / pd.to_numeric(df['taille_cm'], errors='coerce')
+            pd.to_numeric(df['poids_kg'], errors='coerce') /
+            pd.to_numeric(df['taille_cm'], errors='coerce')
         ).replace([np.inf, -np.inf], np.nan).round(2)
+
     if "metres_parcourus" in df.columns and "courses" in df.columns:
         df['ratio_metres_courses'] = (
-            pd.to_numeric(df['metres_parcourus'], errors='coerce') / pd.to_numeric(df['courses'], errors='coerce')
+            pd.to_numeric(df['metres_parcourus'], errors='coerce') /
+            pd.to_numeric(df['courses'], errors='coerce')
         ).replace([np.inf, -np.inf], np.nan).round(2)
+
     if "temps_jeu_min" in df.columns and "nombre_matchs_joues" in df.columns:
         df['ratio_min_matchs'] = (
-            pd.to_numeric(df['temps_jeu_min'], errors='coerce') / pd.to_numeric(df['nombre_matchs_joues'], errors='coerce')
+            pd.to_numeric(df['temps_jeu_min'], errors='coerce') /
+            pd.to_numeric(df['nombre_matchs_joues'], errors='coerce')
         ).replace([np.inf, -np.inf], np.nan).round(2)
 
     return df
 
 
-# -----------------------------------------------------------------
-# LEAGUE COLUMN
-# -----------------------------------------------------------------
-
-def infer_league(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    if "division" in df.columns:
-        df["__league__"] = df["division"].astype(str)
-    else:
-        df["__league__"] = None
+@st.cache_data
+def load_clubs():
+    with sqlite3.connect(DB_FILE) as con:
+        df = pd.read_sql(f"SELECT * FROM {TABLE_CLUBS}", con)
     return df
 
 
 # -----------------------------------------------------------------
-# CUSTOM RADAR SCATTER WITH GRID
+# RADAR FUNCTION (new hover fix)
 # -----------------------------------------------------------------
+def _hex_to_rgba(hex_color, alpha=0.25):
+    hex_color = hex_color.lstrip('#')
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
 
 def make_scatter_radar(radar_df, selected_stats):
     fig = go.Figure()
@@ -105,14 +110,12 @@ def make_scatter_radar(radar_df, selected_stats):
     n_stats = len(selected_stats)
     angles = np.linspace(0, 2*np.pi, n_stats, endpoint=False)
 
-    # Déterminer le max global pour la grille
     max_val = radar_df[selected_stats].apply(pd.to_numeric, errors="coerce").max().max()
     if not np.isfinite(max_val) or max_val <= 0:
         max_val = 1.0
     n_circles = 5
     step = max_val / n_circles
 
-    # Palette de couleurs distinctes
     color_palette = [
         "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
         "#9467bd", "#8c564b", "#e377c2", "#7f7f7f",
@@ -120,49 +123,44 @@ def make_scatter_radar(radar_df, selected_stats):
         "#8c6d31", "#843c39", "#7b4173"
     ]
 
-    # Ajouter cercles concentriques + valeurs sur un axe (x positif)
+    # Cercles + valeurs
+    circle_t = np.linspace(0, 2*np.pi, 200)
     for i in range(1, n_circles+1):
         r = step * i
-        circle_x = [r*np.cos(t) for t in np.linspace(0, 2*np.pi, 200)]
-        circle_y = [r*np.sin(t) for t in np.linspace(0, 2*np.pi, 200)]
+        circle_x = r * np.cos(circle_t)
+        circle_y = r * np.sin(circle_t)
         fig.add_trace(go.Scatter(
-            x=circle_x,
-            y=circle_y,
+            x=circle_x, y=circle_y,
             mode="lines",
             line=dict(color="lightgrey", dash="dot"),
-            showlegend=False,
-            hoverinfo="skip"
+            showlegend=False, hoverinfo="skip"
         ))
-        fig.add_annotation(
-            x=r,
-            y=0,
-            text=str(round(r, 1)),
-            showarrow=False,
-            font=dict(size=10, color="grey")
-        )
+        fig.add_annotation(x=r, y=0, text=str(round(r, 1)),
+                           showarrow=False, font=dict(size=10, color="grey"))
 
-    # Ajouter axes radiaux et labels
+    # Axes + labels
     for angle, stat in zip(angles, selected_stats):
         x_axis = [0, max_val*np.cos(angle)]
         y_axis = [0, max_val*np.sin(angle)]
         fig.add_trace(go.Scatter(
-            x=x_axis,
-            y=y_axis,
+            x=x_axis, y=y_axis,
             mode="lines",
             line=dict(color="lightgrey", dash="dot"),
-            showlegend=False,
-            hoverinfo="skip"
+            showlegend=False, hoverinfo="skip"
         ))
         fig.add_annotation(
             x=max_val*1.05*np.cos(angle),
             y=max_val*1.05*np.sin(angle),
-            text=stat,
-            showarrow=False,
+            text=stat, showarrow=False,
             font=dict(size=12, color="black")
         )
 
-    # Tracer chaque série
+    # Polygones + markers
     for idx, (_, row) in enumerate(radar_df.iterrows()):
+        label = row.get("Joueur", row.get("club", "Inconnu"))
+        color = color_palette[idx % len(color_palette)]
+        fill_rgba = _hex_to_rgba(color, 0.25)
+
         r_values = [row.get(stat, np.nan) for stat in selected_stats]
         r_values = [np.nan if (not pd.notna(v)) else float(v) for v in r_values]
         r_values += [r_values[0]]
@@ -171,30 +169,44 @@ def make_scatter_radar(radar_df, selected_stats):
         x = [0 if (v is np.nan or not np.isfinite(v)) else v*np.cos(t) for v, t in zip(r_values, theta)]
         y = [0 if (v is np.nan or not np.isfinite(v)) else v*np.sin(t) for v, t in zip(r_values, theta)]
 
-        hover_texts = [f"{stat}: {'' if (val is np.nan or not np.isfinite(val)) else round(val, 1)}" for stat, val in zip(selected_stats, r_values[:-1])]
-        hover_texts.append(hover_texts[0])
-
-        color = color_palette[idx % len(color_palette)]
-
+        # Polygone
         fig.add_trace(go.Scatter(
-            x=x,
-            y=y,
-            mode="lines+markers",
-            name=row.get("Joueur", ""),
+            x=x, y=y,
+            mode="lines",
+            name=label,
             fill="toself",
-            text=hover_texts,
-            hovertemplate="%{text}<extra></extra>",
-            line=dict(color=color),
-            marker=dict(color=color)
+            line=dict(color=color, width=2),
+            fillcolor=fill_rgba,
+            hoverinfo="skip",
+            showlegend=True
         ))
 
+        # Marqueurs
+        stats_no_close = list(selected_stats)
+        values_no_close = r_values[:-1]
+        hover_texts = [
+            f"<b>{label}</b><br>{stat}: {'' if (val is np.nan or not np.isfinite(val)) else round(val, 1)}"
+            for stat, val in zip(stats_no_close, values_no_close)
+        ]
+
+        fig.add_trace(go.Scatter(
+            x=x[:-1], y=y[:-1],
+            mode="markers",
+            name=label,
+            marker=dict(color=color, size=8, line=dict(width=1, color="white")),
+            text=hover_texts,
+            hovertemplate="%{text}<extra></extra>",
+            showlegend=False
+        ))
+
+    pad = max_val * 0.15
     fig.update_layout(
-        width=800,
-        height=600,
+        width=800, height=600,
         hovermode="closest",
         dragmode="pan",
-        xaxis=dict(showgrid=False, zeroline=False, visible=False),
-        yaxis=dict(showgrid=False, zeroline=False, visible=False)
+        xaxis=dict(visible=False, range=[-max_val - pad, max_val + pad]),
+        yaxis=dict(visible=False, range=[-max_val - pad, max_val + pad],
+                   scaleanchor="x", scaleratio=1)
     )
 
     return fig
@@ -203,12 +215,12 @@ def make_scatter_radar(radar_df, selected_stats):
 # -----------------------------------------------------------------
 # MAIN APP
 # -----------------------------------------------------------------
+st.set_page_config(page_title="Rugby Top14/Prod2 Players & Clubs", layout="wide")
+st.title("🏉 Rugby Top14/Prod2 Players & Clubs")
 
-st.set_page_config(page_title="Rugby Top14/Prod2 Players", layout="wide")
-st.title("🏉 Rugby Top14/Prod2 Players")
-
-# Charger les joueurs
-df = load_players()
+# Charger joueurs et clubs
+df_players = load_players()
+df_clubs = load_clubs()
 
 # Filtrer les joueurs avec au moins 1 match (si la colonne existe)
 if 'nombre_matchs_joues' in df.columns:
@@ -451,6 +463,7 @@ if selected_stats_clubs and not selected_clubs_df.empty:
     )
 else:
     st.warning("Veuillez sélectionner au moins une statistique et un club pour afficher le radar.")
+
 
 
 
