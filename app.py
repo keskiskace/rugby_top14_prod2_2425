@@ -40,16 +40,23 @@ def download_missing_photos(df, img_dir="images"):
         url = row.get("photo")
         if not url or pd.isna(url):
             continue
+
         img_path = os.path.join(img_dir, f"photo_{player_id}.jpg")
-        if not os.path.exists(img_path):
-            try:
-                r = requests.get(url, timeout=10)
-                r.raise_for_status()
-                with open(img_path, "wb") as f:
-                    f.write(r.content)
-                missing_count += 1
-            except Exception as e:
-                print(f"[ERREUR] {row.get('nom','?')} ({url}) : {e}")
+
+        # ✅ si la photo existe déjà → on ne fait rien
+        if os.path.exists(img_path):
+            continue
+
+        # sinon on essaie de la télécharger
+        try:
+            r = requests.get(url, timeout=5)
+            r.raise_for_status()
+            with open(img_path, "wb") as f:
+                f.write(r.content)
+            missing_count += 1
+        except Exception as e:
+            print(f"[ERREUR] {row.get('nom','?')} ({url}) : {e}")
+
     return missing_count
 
 
@@ -467,6 +474,3 @@ if selected_stats_clubs and not selected_clubs_df.empty:
     )
 else:
     st.warning("Veuillez sélectionner au moins une statistique et un club pour afficher le radar.")
-
-
-
