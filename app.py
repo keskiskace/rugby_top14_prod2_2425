@@ -6,6 +6,7 @@ import numpy as np
 import streamlit as st
 import plotly.graph_objects as go
 from io import BytesIO
+import matplotlib.pyplot as plt
 
 DB_FILE = "top14_prod2_24_25_players_clubs.db"
 TABLE = "players"
@@ -58,6 +59,28 @@ def download_missing_photos(df, img_dir="images"):
             print(f"[ERREUR] {row.get('nom','?')} ({url}) : {e}")
 
     return missing_count
+
+
+# -----------------------------------------------------------------
+# DATAFRAME → IMAGE
+# -----------------------------------------------------------------
+
+def dataframe_to_image(df, filename="table.png"):
+    fig, ax = plt.subplots(figsize=(len(df.columns) * 0.8, len(df) * 0.5))
+    ax.axis("off")
+    tbl = ax.table(
+        cellText=df.values,
+        colLabels=df.columns,
+        rowLabels=df.index,
+        cellLoc="center",
+        loc="center"
+    )
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(8)
+    tbl.scale(1.2, 1.2)
+    plt.savefig(filename, bbox_inches="tight")
+    plt.close(fig)
+    return filename
 
 
 # -----------------------------------------------------------------
@@ -127,7 +150,7 @@ def make_scatter_radar(radar_df, selected_stats):
         "#8c6d31", "#843c39", "#7b4173"
     ]
 
-    # Ajouter cercles concentriques + valeurs sur un axe (x positif)
+    # Ajouter cercles concentriques
     for i in range(1, n_circles+1):
         r = step * i
         circle_x = [r*np.cos(t) for t in np.linspace(0, 2*np.pi, 200)]
@@ -178,7 +201,7 @@ def make_scatter_radar(radar_df, selected_stats):
         x = [0 if (v is np.nan or not np.isfinite(v)) else v*np.cos(t) for v, t in zip(r_values, theta)]
         y = [0 if (v is np.nan or not np.isfinite(v)) else v*np.sin(t) for v, t in zip(r_values, theta)]
 
-        # Surface colorée (remplissage)
+        # Surface colorée
         color = color_palette[idx % len(color_palette)]
         fig.add_trace(go.Scatter(
             x=x,
@@ -193,7 +216,7 @@ def make_scatter_radar(radar_df, selected_stats):
             showlegend=False
         ))
 
-        # Points et lignes avec hover
+        # Points + hover
         hover_texts = [
             f"{row.get('Joueur', '')}<br>{stat}: {'' if (val is np.nan or not np.isfinite(val)) else round(val, 1)}"
             for stat, val in zip(selected_stats, r_values[:-1])
@@ -233,13 +256,13 @@ st.title("🏉 Rugby Top14/Prod2 Players")
 # Charger les joueurs
 df = load_players()
 
-# Filtrer les joueurs avec au moins 1 match (si la colonne existe)
+# Filtrer les joueurs avec au moins 1 match
 if 'nombre_matchs_joues' in df.columns:
     df_nonzero = df[pd.to_numeric(df['nombre_matchs_joues'], errors='coerce').fillna(0) > 0].copy()
 else:
     df_nonzero = df.copy()
 
-# Déterminer la ligue avec la colonne division
+# Déterminer la ligue
 df_labeled = infer_league(df_nonzero)
 
 # Construire les joueurs types
@@ -277,10 +300,9 @@ for nom_type, postes in postes_groupes.items():
             extra_players.append({"nom": nom_type, "club": "Poste moyen", **avg_stats.to_dict()})
 
 extra_df = pd.DataFrame(extra_players) if extra_players else pd.DataFrame()
-
 df_extended = pd.concat([df, extra_df], ignore_index=True) if not extra_df.empty else df.copy()
 
-# Téléchargement auto des photos manquantes
+# Vérification photos
 with st.spinner("Vérification des photos manquantes..."):
     n_new = download_missing_photos(df)
     if n_new > 0:
@@ -292,7 +314,6 @@ with st.spinner("Vérification des photos manquantes..."):
 # SECTION JOUEURS
 # ----------------------
 
-# Sélection des vrais joueurs
 selected_names = st.multiselect(
     "Choisir un ou plusieurs joueurs",
     df['nom'].sort_values().unique(),
@@ -300,23 +321,19 @@ selected_names = st.multiselect(
 )
 selected_players = df[df['nom'].isin(selected_names)]
 
-# Sélection des joueurs types
 selected_types = st.multiselect(
     "Choisir un ou plusieurs joueurs types",
     extra_df['nom'].sort_values().unique() if not extra_df.empty else []
 )
 selected_type_players = extra_df[extra_df['nom'].isin(selected_types)] if not extra_df.empty else pd.DataFrame()
 
-# Concaténer la sélection
 selected_players = pd.concat([selected_players, selected_type_players], ignore_index=True)
 
-# Affichage des infos
 for _, joueur in selected_players.iterrows():
     if "Joueur type" not in str(joueur.get('nom', '')):
         st.subheader(joueur.get('nom', ''))
         photo_to_show = get_image_safe(joueur)
         st.image(photo_to_show, caption=joueur.get('club', ''), width=150)
-
         st.json({
             "Club": joueur.get('club', 'N/A'),
             "Poste": joueur.get('poste', 'N/A'),
@@ -329,12 +346,10 @@ for _, joueur in selected_players.iterrows():
         st.subheader(joueur.get('nom', ''))
         st.info("📊 Joueur type basé sur la moyenne des stats.")
 
-# Colonnes numériques disponibles (joueurs)
 numeric_cols = df_extended.select_dtypes(include=[np.number]).columns.tolist()
 exclude_cols = ["player_id"]
 stat_cols = [c for c in numeric_cols if c not in exclude_cols]
 
-# Sélecteur de stats dynamiques (joueurs)
 selected_stats = st.multiselect(
     "Choisir les statistiques à afficher dans le radar",
     options=stat_cols,
@@ -350,31 +365,23 @@ if selected_stats and not selected_players.empty:
         })
 
     radar_df = pd.DataFrame(radar_data)
-
     fig = make_scatter_radar(radar_df, selected_stats)
 
-    st.plotly_chart(
-        fig,
-        use_container_width=True,
-        config={
-            "scrollZoom": True,
-            "displaylogo": False,
-            "doubleClick": "reset"
-        }
-    )
+    st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True, "displaylogo": False, "doubleClick": "reset"})
 
-    # Tableau comparatif chifré
     st.subheader("📊 Tableau comparatif des joueurs")
     table_df = radar_df.set_index("Joueur").T
     st.dataframe(table_df)
 
-    # Export CSV uniquement
-    st.download_button(
-        "⬇️ Télécharger en CSV",
-        table_df.to_csv().encode("utf-8"),
-        file_name="comparatif_joueurs.csv",
-        mime="text/csv"
-    )
+    # Export CSV
+    st.download_button("⬇️ Télécharger en CSV", table_df.to_csv().encode("utf-8"),
+                       file_name="comparatif_joueurs.csv", mime="text/csv")
+
+    # Export PNG
+    img_file = dataframe_to_image(table_df, "comparatif_joueurs.png")
+    with open(img_file, "rb") as f:
+        st.download_button("⬇️ Télécharger en PNG", f, file_name="comparatif_joueurs.png", mime="image/png")
+
 else:
     st.warning("Veuillez sélectionner au moins une statistique et un joueur pour afficher le radar.")
 
@@ -385,14 +392,11 @@ else:
 
 st.header("📊 Comparaison des Clubs")
 
-# Charger les données clubs
 with sqlite3.connect(DB_FILE) as con:
     clubs_df = pd.read_sql("SELECT * FROM clubs", con)
 
-# Exclure clubs qui n'ont pas joué (0 points marqués)
 clubs_nonzero = clubs_df[pd.to_numeric(clubs_df['points_marqués'], errors='coerce').fillna(0) > 0].copy()
 
-# Créer club type Top14 et ProD2
 extra_clubs = []
 if not clubs_nonzero.empty:
     if (clubs_nonzero['division'].str.contains("Top14", case=False, na=False)).any():
@@ -403,19 +407,15 @@ if not clubs_nonzero.empty:
         extra_clubs.append({"club": "Club type ProD2", **avg_prod2.to_dict()})
 
 extra_clubs_df = pd.DataFrame(extra_clubs) if extra_clubs else pd.DataFrame()
-
 clubs_extended = pd.concat([clubs_df, extra_clubs_df], ignore_index=True) if not extra_clubs_df.empty else clubs_df.copy()
 
-# Sélection des clubs
 selected_clubs = st.multiselect(
     "Choisir un ou plusieurs clubs",
     clubs_extended['club'].sort_values().unique(),
     default=[clubs_extended['club'].sort_values().iloc[0]] if len(clubs_extended) else []
 )
-
 selected_clubs_df = clubs_extended[clubs_extended['club'].isin(selected_clubs)]
 
-# Affichage des logos en ligne "Club1 VS Club2 VS Club3..."
 if not selected_clubs_df.empty:
     logos = []
     for _, club in selected_clubs_df.iterrows():
@@ -426,12 +426,10 @@ if not selected_clubs_df.empty:
     logos_html = " <b>VS</b> ".join(logos)
     st.markdown(f"<div style='text-align:center;'>{logos_html}</div>", unsafe_allow_html=True)
 
-# Colonnes numériques disponibles (clubs)
 numeric_cols_clubs = clubs_extended.select_dtypes(include=[np.number]).columns.tolist()
 exclude_cols_clubs = ["classement"]
 stat_cols_clubs = [c for c in numeric_cols_clubs if c not in exclude_cols_clubs]
 
-# Sélecteur de stats dynamiques (clubs)
 selected_stats_clubs = st.multiselect(
     "Choisir les statistiques à afficher dans le radar (clubs)",
     options=stat_cols_clubs,
@@ -447,30 +445,22 @@ if selected_stats_clubs and not selected_clubs_df.empty:
         })
 
     radar_df = pd.DataFrame(radar_data)
-
     fig = make_scatter_radar(radar_df, selected_stats_clubs)
 
-    st.plotly_chart(
-        fig,
-        use_container_width=True,
-        config={
-            "scrollZoom": True,
-            "displaylogo": False,
-            "doubleClick": "reset"
-        }
-    )
+    st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True, "displaylogo": False, "doubleClick": "reset"})
 
-    # Tableau comparatif chiffré
     st.subheader("📊 Tableau comparatif des clubs")
     table_df = radar_df.set_index("Joueur").T
     st.dataframe(table_df)
 
     # Export CSV
-    st.download_button(
-        "⬇️ Télécharger en CSV",
-        table_df.to_csv().encode("utf-8"),
-        file_name="comparatif_clubs.csv",
-        mime="text/csv"
-    )
+    st.download_button("⬇️ Télécharger en CSV", table_df.to_csv().encode("utf-8"),
+                       file_name="comparatif_clubs.csv", mime="text/csv")
+
+    # Export PNG
+    img_file = dataframe_to_image(table_df, "comparatif_clubs.png")
+    with open(img_file, "rb") as f:
+        st.download_button("⬇️ Télécharger en PNG", f, file_name="comparatif_clubs.png", mime="image/png")
+
 else:
     st.warning("Veuillez sélectionner au moins une statistique et un club pour afficher le radar.")
