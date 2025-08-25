@@ -223,9 +223,8 @@ def make_scatter_radar(radar_df, selected_stats):
 st.set_page_config(page_title="Rugby Top14/Prod2 Players", layout="wide")
 st.title("🏉 Rugby Top14/Prod2 Players")
 
-# Charger joueurs et clubs
-df_players = load_players()
-df_clubs = load_clubs()
+# Charger les joueurs
+df = load_players()
 
 # Filtrer les joueurs avec au moins 1 match (si la colonne existe)
 if 'nombre_matchs_joues' in df.columns:
@@ -468,8 +467,6 @@ if selected_stats_clubs and not selected_clubs_df.empty:
     )
 else:
     st.warning("Veuillez sélectionner au moins une statistique et un club pour afficher le radar.")
-
-
 
 
 
