@@ -390,7 +390,7 @@ if not filtered.empty and choice_stat:
     if choice_type == "Top 10":
         result = filtered.nlargest(10, choice_stat)[["nom", "club", "division", choice_stat]]
     else:
-        result = filtered.nsmallest(10, choice_stat)[["nom", "club", "division",
+        result = filtered.nsmallest(10, choice_stat)[["nom", "club", "division", choice_stat]]
 if not filtered.empty and choice_stat:
     if choice_type == "Top 10":
         result = filtered.nlargest(10, choice_stat)[["nom", "club", "division", choice_stat]]
@@ -415,3 +415,4 @@ if not filtered.empty and choice_stat:
 
 else:
     st.warning("Aucun joueur trouvé pour ces critères.")
+
