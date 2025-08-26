@@ -494,7 +494,6 @@ else:
     st.warning("Veuillez sélectionner au moins une statistique et un club pour afficher le radar.")
 
 
-else:
-    st.warning("Aucun joueur trouvé pour ces critères.")
+
 
 
