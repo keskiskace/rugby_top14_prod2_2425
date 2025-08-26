@@ -413,6 +413,88 @@ if not filtered.empty and choice_stat:
     with open(img_file, "rb") as f:
         st.download_button("⬇️ Télécharger en PNG", f, file_name=f"{choice_type.lower()}_{choice_stat}.png", mime="image/png")
 
+
+# ----------------------
+# SECTION CLUBS
+# ----------------------
+
+st.header("📊 Comparaison des Clubs")
+
+with sqlite3.connect(DB_FILE) as con:
+    clubs_df = pd.read_sql("SELECT * FROM clubs", con)
+
+clubs_nonzero = clubs_df[pd.to_numeric(clubs_df['points_marqués'], errors='coerce').fillna(0) > 0].copy()
+
+extra_clubs = []
+if not clubs_nonzero.empty:
+    if (clubs_nonzero['division'].str.contains("Top14", case=False, na=False)).any():
+        avg_top14 = clubs_nonzero[clubs_nonzero['division'].str.contains("Top14", case=False, na=False)].mean(numeric_only=True).round(1)
+        extra_clubs.append({"club": "Club type Top14", **avg_top14.to_dict()})
+    if (clubs_nonzero['division'].str.contains("ProD2", case=False, na=False)).any():
+        avg_prod2 = clubs_nonzero[clubs_nonzero['division'].str.contains("ProD2", case=False, na=False)].mean(numeric_only=True).round(1)
+        extra_clubs.append({"club": "Club type ProD2", **avg_prod2.to_dict()})
+
+extra_clubs_df = pd.DataFrame(extra_clubs) if extra_clubs else pd.DataFrame()
+clubs_extended = pd.concat([clubs_df, extra_clubs_df], ignore_index=True) if not extra_clubs_df.empty else clubs_df.copy()
+
+selected_clubs = st.multiselect(
+    "Choisir un ou plusieurs clubs",
+    clubs_extended['club'].sort_values().unique(),
+    default=[clubs_extended['club'].sort_values().iloc[0]] if len(clubs_extended) else []
+)
+selected_clubs_df = clubs_extended[clubs_extended['club'].isin(selected_clubs)]
+
+if not selected_clubs_df.empty:
+    logos = []
+    for _, club in selected_clubs_df.iterrows():
+        if "http" in str(club.get("logo", "")):
+            logos.append(f"<img src='{club['logo']}' width='60'>")
+        else:
+            logos.append(club.get("club", ""))
+    logos_html = " <b>VS</b> ".join(logos)
+    st.markdown(f"<div style='text-align:center;'>{logos_html}</div>", unsafe_allow_html=True)
+
+numeric_cols_clubs = clubs_extended.select_dtypes(include=[np.number]).columns.tolist()
+exclude_cols_clubs = ["classement"]
+stat_cols_clubs = [c for c in numeric_cols_clubs if c not in exclude_cols_clubs]
+
+selected_stats_clubs = st.multiselect(
+    "Choisir les statistiques à afficher dans le radar (clubs)",
+    options=stat_cols_clubs,
+    default=stat_cols_clubs[:5] if len(stat_cols_clubs) > 5 else stat_cols_clubs
+)
+
+if selected_stats_clubs and not selected_clubs_df.empty:
+    radar_data = []
+    for _, club in selected_clubs_df.iterrows():
+        radar_data.append({
+            "Joueur": club.get("club", ""),
+            **{stat: club.get(stat, np.nan) for stat in selected_stats_clubs}
+        })
+
+    radar_df = pd.DataFrame(radar_data)
+    fig = make_scatter_radar(radar_df, selected_stats_clubs)
+
+    st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True, "displaylogo": False, "doubleClick": "reset"})
+
+    st.subheader("📊 Tableau comparatif des clubs")
+    table_df = radar_df.set_index("Joueur").T
+    st.dataframe(table_df)
+
+    # Export CSV
+    st.download_button("⬇️ Télécharger en CSV", table_df.to_csv().encode("utf-8"),
+                       file_name="comparatif_clubs.csv", mime="text/csv")
+
+    # Export PNG
+    img_file = dataframe_to_image(table_df, "comparatif_clubs.png")
+    with open(img_file, "rb") as f:
+        st.download_button("⬇️ Télécharger en PNG", f, file_name="comparatif_clubs.png", mime="image/png")
+
+else:
+    st.warning("Veuillez sélectionner au moins une statistique et un club pour afficher le radar.")
+
+
 else:
     st.warning("Aucun joueur trouvé pour ces critères.")
+
 
