@@ -4,13 +4,6 @@ import requests
 import pandas as pd
 import numpy as np
 import streamlit as st
-import plotly.gr
-import os
-import sqlite3
-import requests
-import pandas as pd
-import numpy as np
-import streamlit as st
 import plotly.graph_objects as go
 from io import BytesIO
 import matplotlib.pyplot as plt
@@ -863,5 +856,6 @@ if not filtered.empty and choice_stat:
         st.download_button("⬇️ Télécharger en PNG", f, file_name=f"{choice_type.lower()}_{choice_stat}.png", mime="image/png")
 else:
     st.warning("Aucun joueur trouvé pour ces critères.")
+
 
 
