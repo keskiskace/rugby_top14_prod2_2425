@@ -8,63 +8,76 @@ import plotly.graph_objects as go
 from io import BytesIO
 import matplotlib.pyplot as plt
 
-DB_FILE = "top14_prod2_24_25_players_clubs.db"
-TABLE = "players"
+# -----------------------------------------------------------------
+# CONFIG
+# -----------------------------------------------------------------
+DB_FILE = "top14_prod2_24_25_players_clubs.db"  # adapte le nom si besoin
+IMAGES_DIR = "images"
+FALLBACK_IMAGE = os.path.join(IMAGES_DIR, "no_player.webp")
+
+st.set_page_config(page_title="Rugby Top14/Prod2 Players", layout="wide")
+st.title("🏉 Rugby Top14/Prod2 Players")
+
 
 # -----------------------------------------------------------------
-# IMAGE MANAGEMENT
+# UTILITAIRES IMAGE / FICHIER
 # -----------------------------------------------------------------
-
 def get_image_safe(player):
-    fallback = "images/no_player.webp"
-    img_path = f"images/photo_{player['player_id']}.jpg"
+    """
+    Retourne soit un path local (images/photo_{player_id}.jpg),
+    soit l'URL si fournie, sinon l'image fallback.
+    """
+    fallback = FALLBACK_IMAGE
+    player_id = player.get("player_id") or player.get("id") or ""
+    img_path = os.path.join(IMAGES_DIR, f"photo_{player_id}.jpg")
 
     if os.path.exists(img_path):
         return img_path
 
-    if isinstance(player.get('photo', ''), str) and player.get('photo', '').startswith("http"):
-        try:
-            r = requests.get(player['photo'], timeout=5)
-            r.raise_for_status()
-            return player['photo']
-        except Exception:
-            pass
+    photo_field = player.get("photo", "")
+    if isinstance(photo_field, str) and photo_field.startswith("http"):
+        return photo_field
 
     return fallback
 
 
-def download_missing_photos(df, img_dir="images"):
+def download_missing_photos(df, img_dir=IMAGES_DIR, timeout=5):
+    """
+    Télécharge les photos présentes dans la colonne 'photo' si elles n'existent pas localement.
+    Retourne le nombre de photos téléchargées.
+    """
     os.makedirs(img_dir, exist_ok=True)
     missing_count = 0
     for _, row in df.iterrows():
-        player_id = row.get("player_id")
+        player_id = row.get("player_id") or row.get("id")
         url = row.get("photo")
         if not url or pd.isna(url):
             continue
 
         img_path = os.path.join(img_dir, f"photo_{player_id}.jpg")
-
         if os.path.exists(img_path):
             continue
 
         try:
-            r = requests.get(url, timeout=5)
+            r = requests.get(url, timeout=timeout)
             r.raise_for_status()
             with open(img_path, "wb") as f:
                 f.write(r.content)
             missing_count += 1
         except Exception as e:
+            # on affiche en console pour debug; évite de casser l'app
             print(f"[ERREUR] {row.get('nom','?')} ({url}) : {e}")
 
     return missing_count
 
 
-# -----------------------------------------------------------------
-# DATAFRAME → IMAGE
-# -----------------------------------------------------------------
-
 def dataframe_to_image(df, filename="table.png"):
-    fig, ax = plt.subplots(figsize=(len(df.columns) * 0.8, len(df) * 0.5))
+    """
+    Convertit un DataFrame en image via matplotlib.table et renvoie le nom de fichier.
+    """
+    # taille raisonnable
+    n_rows, n_cols = max(1, len(df)), max(1, len(df.columns))
+    fig, ax = plt.subplots(figsize=(max(6, n_cols * 1.2), max(2, n_rows * 0.5)))
     ax.axis("off")
     tbl = ax.table(
         cellText=df.values,
@@ -76,30 +89,38 @@ def dataframe_to_image(df, filename="table.png"):
     tbl.auto_set_font_size(False)
     tbl.set_fontsize(8)
     tbl.scale(1.2, 1.2)
-    plt.savefig(filename, bbox_inches="tight")
+    plt.tight_layout()
+    plt.savefig(filename, bbox_inches="tight", dpi=150)
     plt.close(fig)
     return filename
 
 
 # -----------------------------------------------------------------
-# LOAD DATA
+# CHARGEMENT DES DONNÉES
 # -----------------------------------------------------------------
 @st.cache_data
 def load_players():
     with sqlite3.connect(DB_FILE) as con:
-        df = pd.read_sql(f"SELECT * FROM {TABLE}", con)
+        df = pd.read_sql("SELECT * FROM players", con)
 
+    # conversion prudente des colonnes numériques si possible
     for col in df.columns:
-        df[col] = pd.to_numeric(df[col], errors='ignore')
+        try:
+            df[col] = pd.to_numeric(df[col], errors='ignore')
+        except Exception:
+            pass
 
+    # quelques ratios pratiques si les colonnes existent
     if "poids_kg" in df.columns and "taille_cm" in df.columns:
         df['ratio_poids_taille'] = (
             pd.to_numeric(df['poids_kg'], errors='coerce') / pd.to_numeric(df['taille_cm'], errors='coerce')
         ).replace([np.inf, -np.inf], np.nan).round(2)
+
     if "metres_parcourus" in df.columns and "courses" in df.columns:
         df['ratio_metres_courses'] = (
             pd.to_numeric(df['metres_parcourus'], errors='coerce') / pd.to_numeric(df['courses'], errors='coerce')
         ).replace([np.inf, -np.inf], np.nan).round(2)
+
     if "temps_jeu_min" in df.columns and "nombre_matchs_joues" in df.columns:
         df['ratio_min_matchs'] = (
             pd.to_numeric(df['temps_jeu_min'], errors='coerce') / pd.to_numeric(df['nombre_matchs_joues'], errors='coerce')
@@ -108,11 +129,25 @@ def load_players():
     return df
 
 
-# -----------------------------------------------------------------
-# LEAGUE COLUMN
-# -----------------------------------------------------------------
+@st.cache_data
+def load_clubs():
+    with sqlite3.connect(DB_FILE) as con:
+        clubs_df = pd.read_sql("SELECT * FROM clubs", con)
 
+    for col in clubs_df.columns:
+        try:
+            clubs_df[col] = pd.to_numeric(clubs_df[col], errors='ignore')
+        except Exception:
+            pass
+
+    return clubs_df
+
+
+# -----------------------------------------------------------------
+# INFÉRENCE LIGUE (petit helper)
+# -----------------------------------------------------------------
 def infer_league(df: pd.DataFrame) -> pd.DataFrame:
+    # conserve la colonne "division" si elle existe, sinon créé __league__ vide
     df = df.copy()
     if "division" in df.columns:
         df["__league__"] = df["division"].astype(str)
@@ -122,15 +157,15 @@ def infer_league(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # -----------------------------------------------------------------
-# CUSTOM RADAR SCATTER WITH GRID
+# RADAR CUSTOM
 # -----------------------------------------------------------------
-
 def make_scatter_radar(radar_df, selected_stats):
     fig = go.Figure()
 
     n_stats = len(selected_stats)
-    angles = np.linspace(0, 2*np.pi, n_stats, endpoint=False)
+    angles = np.linspace(0, 2 * np.pi, n_stats, endpoint=False)
 
+    # max pour l'échelle
     max_val = radar_df[selected_stats].apply(pd.to_numeric, errors="coerce").max().max()
     if not np.isfinite(max_val) or max_val <= 0:
         max_val = 1.0
@@ -144,10 +179,11 @@ def make_scatter_radar(radar_df, selected_stats):
         "#8c6d31", "#843c39", "#7b4173"
     ]
 
-    for i in range(1, n_circles+1):
+    # cercles concentriques
+    for i in range(1, n_circles + 1):
         r = step * i
-        circle_x = [r*np.cos(t) for t in np.linspace(0, 2*np.pi, 200)]
-        circle_y = [r*np.sin(t) for t in np.linspace(0, 2*np.pi, 200)]
+        circle_x = [r * np.cos(t) for t in np.linspace(0, 2 * np.pi, 200)]
+        circle_y = [r * np.sin(t) for t in np.linspace(0, 2 * np.pi, 200)]
         fig.add_trace(go.Scatter(
             x=circle_x,
             y=circle_y,
@@ -164,9 +200,10 @@ def make_scatter_radar(radar_df, selected_stats):
             font=dict(size=10, color="grey")
         )
 
+    # axes
     for angle, stat in zip(angles, selected_stats):
-        x_axis = [0, max_val*np.cos(angle)]
-        y_axis = [0, max_val*np.sin(angle)]
+        x_axis = [0, max_val * np.cos(angle)]
+        y_axis = [0, max_val * np.sin(angle)]
         fig.add_trace(go.Scatter(
             x=x_axis,
             y=y_axis,
@@ -176,21 +213,23 @@ def make_scatter_radar(radar_df, selected_stats):
             hoverinfo="skip"
         ))
         fig.add_annotation(
-            x=max_val*1.05*np.cos(angle),
-            y=max_val*1.05*np.sin(angle),
+            x=max_val * 1.05 * np.cos(angle),
+            y=max_val * 1.05 * np.sin(angle),
             text=stat,
             showarrow=False,
             font=dict(size=12, color="black")
         )
 
+    # polygones des joueurs/clubs
     for idx, (_, row) in enumerate(radar_df.iterrows()):
         r_values = [row.get(stat, np.nan) for stat in selected_stats]
         r_values = [np.nan if (not pd.notna(v)) else float(v) for v in r_values]
+        # ferme le polygone
         r_values += [r_values[0]]
         theta = np.append(angles, angles[0])
 
-        x = [0 if (v is np.nan or not np.isfinite(v)) else v*np.cos(t) for v, t in zip(r_values, theta)]
-        y = [0 if (v is np.nan or not np.isfinite(v)) else v*np.sin(t) for v, t in zip(r_values, theta)]
+        x = [0 if (v is np.nan or not np.isfinite(v)) else v * np.cos(t) for v, t in zip(r_values, theta)]
+        y = [0 if (v is np.nan or not np.isfinite(v)) else v * np.sin(t) for v, t in zip(r_values, theta)]
 
         color = color_palette[idx % len(color_palette)]
         fig.add_trace(go.Scatter(
@@ -238,20 +277,42 @@ def make_scatter_radar(radar_df, selected_stats):
 # -----------------------------------------------------------------
 # MAIN APP
 # -----------------------------------------------------------------
-
-st.set_page_config(page_title="Rugby Top14/Prod2 Players", layout="wide")
-st.title("🏉 Rugby Top14/Prod2 Players")
-
-# Charger les joueurs
+# Chargement complet (toutes saisons)
 df = load_players()
 
-if 'nombre_matchs_joues' in df.columns:
-    df_nonzero = df[pd.to_numeric(df['nombre_matchs_joues'], errors='coerce').fillna(0) > 0].copy()
+if df is None or df.empty:
+    st.warning("La table 'players' est vide ou introuvable dans la DB.")
+    st.stop()
+
+# --- Saisons (joueurs) : multiselect ---
+saisons_disponibles = sorted(df['saison'].dropna().unique(), reverse=True)
+if len(saisons_disponibles) == 0:
+    st.warning("Aucune saison trouvée dans la table players.")
+    st.stop()
+
+selected_saisons = st.multiselect(
+    "Choisir une ou plusieurs saisons (joueurs)",
+    saisons_disponibles,
+    default=[saisons_disponibles[0]]
+)
+
+df_filtered = df[df['saison'].isin(selected_saisons)].copy()
+
+# Ajout d'une colonne d'affichage dépendant du choix de saison(s)
+if len(selected_saisons) > 1:
+    df_filtered['display_name'] = df_filtered['nom'].astype(str) + " (" + df_filtered['saison'].astype(str) + ")"
 else:
-    df_nonzero = df.copy()
+    df_filtered['display_name'] = df_filtered['nom'].astype(str)
+
+# filtres de base
+if 'nombre_matchs_joues' in df_filtered.columns:
+    df_nonzero = df_filtered[pd.to_numeric(df_filtered['nombre_matchs_joues'], errors='coerce').fillna(0) > 0].copy()
+else:
+    df_nonzero = df_filtered.copy()
 
 df_labeled = infer_league(df_nonzero)
 
+# calcul des "joueurs types" (moyennes par division / poste)
 extra_players = []
 
 if not df_labeled.empty and '__league__' in df_labeled.columns:
@@ -285,37 +346,71 @@ for nom_type, postes in postes_groupes.items():
             extra_players.append({"nom": nom_type, "club": "Poste moyen", **avg_stats.to_dict()})
 
 extra_df = pd.DataFrame(extra_players) if extra_players else pd.DataFrame()
-df_extended = pd.concat([df, extra_df], ignore_index=True) if not extra_df.empty else df.copy()
 
-with st.spinner("Vérification des photos manquantes..."):
-    n_new = download_missing_photos(df)
-    if n_new > 0:
-        st.success(f"{n_new} photo(s) téléchargée(s) automatiquement ✅")
-    else:
-        st.info("Toutes les photos sont déjà présentes 👍")
+# dataset "étendu" pour stats (joueurs + joueurs types)
+df_extended = pd.concat([df_filtered, extra_df], ignore_index=True) if not extra_df.empty else df_filtered.copy()
+
+# --- Vérification / téléchargement photos (optionnel via bouton / case) ---
+col1, col2 = st.columns([1, 3])
+with col1:
+    auto_check = st.checkbox("Télécharger les photos manquantes au chargement", value=False)
+with col2:
+    manual_btn = st.button("📥 Vérifier/ Télécharger maintenant")
+
+if auto_check or manual_btn:
+    with st.spinner("Vérification des photos manquantes..."):
+        try:
+            n_new = download_missing_photos(df_filtered)
+            if n_new > 0:
+                st.success(f"{n_new} photo(s) téléchargée(s) automatiquement ✅")
+            else:
+                st.info("Toutes les photos sont déjà présentes 👍")
+        except Exception as e:
+            st.error(f"Erreur lors du téléchargement des photos : {e}")
+else:
+    st.info("Photos non vérifiées (clique 'Télécharger maintenant' ou coche la case pour le faire automatiquement).")
+
 
 # ----------------------
 # SECTION JOUEURS
 # ----------------------
+st.header("🔎 Joueurs — Comparateur")
+
+# Sélection joueurs (display_name)
+player_options = df_filtered['display_name'].sort_values().unique().tolist()
+if player_options:
+    default_sel = [player_options[0]]
+else:
+    default_sel = []
 
 selected_names = st.multiselect(
     "Choisir un ou plusieurs joueurs",
-    df['nom'].sort_values().unique(),
-    default=[df['nom'].sort_values().iloc[0]] if len(df) else []
+    player_options,
+    default=default_sel
 )
-selected_players = df[df['nom'].isin(selected_names)]
+selected_players = df_filtered[df_filtered['display_name'].isin(selected_names)].copy()
 
-selected_types = st.multiselect(
-    "Choisir un ou plusieurs joueurs types",
-    extra_df['nom'].sort_values().unique() if not extra_df.empty else []
-)
-selected_type_players = extra_df[extra_df['nom'].isin(selected_types)] if not extra_df.empty else pd.DataFrame()
+# Sélection joueurs types (si présents)
+selected_types = []
+if not extra_df.empty:
+    types_opts = extra_df['nom'].sort_values().unique().tolist()
+    selected_types = st.multiselect("Choisir un ou plusieurs joueurs types", types_opts, default=[])
+    selected_type_players = extra_df[extra_df['nom'].isin(selected_types)].copy()
+else:
+    selected_type_players = pd.DataFrame()
 
-selected_players = pd.concat([selected_players, selected_type_players], ignore_index=True)
+# Concat sélection réelle
+if not selected_type_players.empty and not selected_players.empty:
+    selected_players = pd.concat([selected_players, selected_type_players], ignore_index=True)
+elif not selected_type_players.empty and selected_players.empty:
+    selected_players = selected_type_players.copy()
 
+# Affichage des joueurs sélectionnés (photo + infos)
 for _, joueur in selected_players.iterrows():
-    if "Joueur type" not in str(joueur.get('nom', '')):
-        st.subheader(joueur.get('nom', ''))
+    nom_aff = joueur.get('nom', '')
+    st.subheader(nom_aff)
+    if "Joueur type" not in str(nom_aff):
+        # joueur réel -> image et json info
         photo_to_show = get_image_safe(joueur)
         st.image(photo_to_show, caption=joueur.get('club', ''), width=150)
         st.json({
@@ -327,11 +422,11 @@ for _, joueur in selected_players.iterrows():
             "Ratio poids/taille": joueur.get('ratio_poids_taille', 'N/A')
         })
     else:
-        st.subheader(joueur.get('nom', ''))
-        st.info("📊 Joueur type basé sur la moyenne des stats.")
+        st.info("📊 Joueur type (moyenne des stats).")
 
+# préparation colonnes statistiques (depuis df_extended)
 numeric_cols = df_extended.select_dtypes(include=[np.number]).columns.tolist()
-exclude_cols = ["player_id"]
+exclude_cols = ["player_id", "id"]
 stat_cols = [c for c in numeric_cols if c not in exclude_cols]
 
 selected_stats = st.multiselect(
@@ -343,14 +438,13 @@ selected_stats = st.multiselect(
 if selected_stats and not selected_players.empty:
     radar_data = []
     for _, joueur in selected_players.iterrows():
-        radar_data.append({
-            "Joueur": joueur.get('nom', ''),
-            **{stat: joueur.get(stat, np.nan) for stat in selected_stats}
-        })
+        entry = {"Joueur": joueur.get('nom', '')}
+        for stat in selected_stats:
+            entry[stat] = joueur.get(stat, np.nan)
+        radar_data.append(entry)
 
     radar_df = pd.DataFrame(radar_data)
     fig = make_scatter_radar(radar_df, selected_stats)
-
     st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True, "displaylogo": False, "doubleClick": "reset"})
 
     st.subheader("📊 Tableau comparatif des joueurs")
@@ -368,34 +462,30 @@ else:
 
 
 # ----------------------
-# SECTION TOP/FLOP TEN
+# SECTION TOP / FLOP TEN
 # ----------------------
-
 st.header("🏆 Top / Flop 10 Joueurs")
 
 choice_type = st.radio("Choisir le type", ["Top 10", "Flop 10"])
 choice_division = st.selectbox("Choisir une division", ["Toutes", "Top14", "ProD2"])
-choice_club = st.selectbox("Choisir un club (optionnel)", ["Aucun"] + sorted(df['club'].dropna().unique().tolist()))
-choice_stat = st.selectbox("Choisir une statistique", stat_cols)
+club_choices = ["Aucun"] + sorted(df_filtered['club'].dropna().unique().tolist())
+choice_club = st.selectbox("Choisir un club (optionnel)", club_choices)
 
-filtered = df_nonzero.copy()
+choice_stat = st.selectbox("Choisir une statistique", stat_cols) if stat_cols else None
 
-if choice_division != "Toutes":
-    filtered = filtered[filtered['division'].str.contains(choice_division, case=False, na=False)]
+filtered_for_top = df_nonzero.copy()
+
+if choice_division != "Toutes" and "division" in filtered_for_top.columns:
+    filtered_for_top = filtered_for_top[filtered_for_top['division'].str.contains(choice_division, case=False, na=False)]
 
 if choice_club != "Aucun":
-    filtered = filtered[filtered['club'] == choice_club]
+    filtered_for_top = filtered_for_top[filtered_for_top['club'] == choice_club]
 
-if not filtered.empty and choice_stat:
+if not filtered_for_top.empty and choice_stat:
     if choice_type == "Top 10":
-        result = filtered.nlargest(10, choice_stat)[["nom", "club", "division", choice_stat]]
+        result = filtered_for_top.nlargest(10, choice_stat)[["nom", "club", "division", choice_stat]]
     else:
-        result = filtered.nsmallest(10, choice_stat)[["nom", "club", "division", choice_stat]]
-if not filtered.empty and choice_stat:
-    if choice_type == "Top 10":
-        result = filtered.nlargest(10, choice_stat)[["nom", "club", "division", choice_stat]]
-    else:
-        result = filtered.nsmallest(10, choice_stat)[["nom", "club", "division", choice_stat]]
+        result = filtered_for_top.nsmallest(10, choice_stat)[["nom", "club", "division", choice_stat]]
 
     st.subheader(f"{choice_type} sur {choice_stat}")
     st.dataframe(result)
@@ -412,88 +502,104 @@ if not filtered.empty and choice_stat:
     img_file = dataframe_to_image(result, f"{choice_type.lower()}_{choice_stat}.png")
     with open(img_file, "rb") as f:
         st.download_button("⬇️ Télécharger en PNG", f, file_name=f"{choice_type.lower()}_{choice_stat}.png", mime="image/png")
+else:
+    st.info("Top/Flop indisponible (vérifie les filtres et la statistique choisie).")
 
 
 # ----------------------
 # SECTION CLUBS
 # ----------------------
-
 st.header("📊 Comparaison des Clubs")
 
-with sqlite3.connect(DB_FILE) as con:
-    clubs_df = pd.read_sql("SELECT * FROM clubs", con)
-
-clubs_nonzero = clubs_df[pd.to_numeric(clubs_df['points_marqués'], errors='coerce').fillna(0) > 0].copy()
-
-extra_clubs = []
-if not clubs_nonzero.empty:
-    if (clubs_nonzero['division'].str.contains("Top14", case=False, na=False)).any():
-        avg_top14 = clubs_nonzero[clubs_nonzero['division'].str.contains("Top14", case=False, na=False)].mean(numeric_only=True).round(1)
-        extra_clubs.append({"club": "Club type Top14", **avg_top14.to_dict()})
-    if (clubs_nonzero['division'].str.contains("ProD2", case=False, na=False)).any():
-        avg_prod2 = clubs_nonzero[clubs_nonzero['division'].str.contains("ProD2", case=False, na=False)].mean(numeric_only=True).round(1)
-        extra_clubs.append({"club": "Club type ProD2", **avg_prod2.to_dict()})
-
-extra_clubs_df = pd.DataFrame(extra_clubs) if extra_clubs else pd.DataFrame()
-clubs_extended = pd.concat([clubs_df, extra_clubs_df], ignore_index=True) if not extra_clubs_df.empty else clubs_df.copy()
-
-selected_clubs = st.multiselect(
-    "Choisir un ou plusieurs clubs",
-    clubs_extended['club'].sort_values().unique(),
-    default=[clubs_extended['club'].sort_values().iloc[0]] if len(clubs_extended) else []
-)
-selected_clubs_df = clubs_extended[clubs_extended['club'].isin(selected_clubs)]
-
-if not selected_clubs_df.empty:
-    logos = []
-    for _, club in selected_clubs_df.iterrows():
-        if "http" in str(club.get("logo", "")):
-            logos.append(f"<img src='{club['logo']}' width='60'>")
-        else:
-            logos.append(club.get("club", ""))
-    logos_html = " <b>VS</b> ".join(logos)
-    st.markdown(f"<div style='text-align:center;'>{logos_html}</div>", unsafe_allow_html=True)
-
-numeric_cols_clubs = clubs_extended.select_dtypes(include=[np.number]).columns.tolist()
-exclude_cols_clubs = ["classement"]
-stat_cols_clubs = [c for c in numeric_cols_clubs if c not in exclude_cols_clubs]
-
-selected_stats_clubs = st.multiselect(
-    "Choisir les statistiques à afficher dans le radar (clubs)",
-    options=stat_cols_clubs,
-    default=stat_cols_clubs[:5] if len(stat_cols_clubs) > 5 else stat_cols_clubs
-)
-
-if selected_stats_clubs and not selected_clubs_df.empty:
-    radar_data = []
-    for _, club in selected_clubs_df.iterrows():
-        radar_data.append({
-            "Joueur": club.get("club", ""),
-            **{stat: club.get(stat, np.nan) for stat in selected_stats_clubs}
-        })
-
-    radar_df = pd.DataFrame(radar_data)
-    fig = make_scatter_radar(radar_df, selected_stats_clubs)
-
-    st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True, "displaylogo": False, "doubleClick": "reset"})
-
-    st.subheader("📊 Tableau comparatif des clubs")
-    table_df = radar_df.set_index("Joueur").T
-    st.dataframe(table_df)
-
-    # Export CSV
-    st.download_button("⬇️ Télécharger en CSV", table_df.to_csv().encode("utf-8"),
-                       file_name="comparatif_clubs.csv", mime="text/csv")
-
-    # Export PNG
-    img_file = dataframe_to_image(table_df, "comparatif_clubs.png")
-    with open(img_file, "rb") as f:
-        st.download_button("⬇️ Télécharger en PNG", f, file_name="comparatif_clubs.png", mime="image/png")
-
+clubs_df = load_clubs()
+if clubs_df is None or clubs_df.empty:
+    st.warning("La table 'clubs' est vide ou introuvable dans la DB.")
 else:
-    st.warning("Veuillez sélectionner au moins une statistique et un club pour afficher le radar.")
+    # choix des saisons (clubs)
+    saisons_disponibles_clubs = sorted(clubs_df['saison'].dropna().unique(), reverse=True)
+    if len(saisons_disponibles_clubs) == 0:
+        st.warning("Aucune saison trouvée dans la table clubs.")
+    else:
+        selected_saisons_clubs = st.multiselect(
+            "Choisir une ou plusieurs saisons (clubs)",
+            saisons_disponibles_clubs,
+            default=[saisons_disponibles_clubs[0]]
+        )
 
+        clubs_filtered = clubs_df[clubs_df['saison'].isin(selected_saisons_clubs)].copy()
+        if len(selected_saisons_clubs) > 1:
+            clubs_filtered['display_name'] = clubs_filtered['club'].astype(str) + " (" + clubs_filtered['saison'].astype(str) + ")"
+        else:
+            clubs_filtered['display_name'] = clubs_filtered['club'].astype(str)
 
+        # clubs types (moyennes)
+        clubs_nonzero = clubs_filtered.copy()
+        extra_clubs = []
+        if not clubs_nonzero.empty:
+            if (clubs_nonzero['division'].str.contains("Top14", case=False, na=False)).any():
+                avg_top14 = clubs_nonzero[clubs_nonzero['division'].str.contains("Top14", case=False, na=False)].mean(numeric_only=True).round(1)
+                extra_clubs.append({"club": "Club type Top14", **avg_top14.to_dict()})
+            if (clubs_nonzero['division'].str.contains("ProD2", case=False, na=False)).any():
+                avg_prod2 = clubs_nonzero[clubs_nonzero['division'].str.contains("ProD2", case=False, na=False)].mean(numeric_only=True).round(1)
+                extra_clubs.append({"club": "Club type ProD2", **avg_prod2.to_dict()})
 
+        extra_clubs_df = pd.DataFrame(extra_clubs) if extra_clubs else pd.DataFrame()
+        clubs_extended = pd.concat([clubs_filtered, extra_clubs_df], ignore_index=True) if not extra_clubs_df.empty else clubs_filtered.copy()
 
+        # sélection club
+        club_options = clubs_filtered['display_name'].sort_values().unique().tolist()
+        selected_clubs = st.multiselect(
+            "Choisir un ou plusieurs clubs",
+            club_options,
+            default=[club_options[0]] if club_options else []
+        )
+        selected_clubs_df = clubs_filtered[clubs_filtered['display_name'].isin(selected_clubs)].copy()
 
+        if not selected_clubs_df.empty:
+            # affichage logos (si urls) ou noms
+            logos = []
+            for _, club in selected_clubs_df.iterrows():
+                logo_field = club.get("logo", "")
+                if isinstance(logo_field, str) and logo_field.startswith("http"):
+                    logos.append(f"<img src='{logo_field}' width='60'>")
+                else:
+                    logos.append(club.get("club", ""))
+            logos_html = " <b>VS</b> ".join(logos)
+            st.markdown(f"<div style='text-align:center;'>{logos_html}</div>", unsafe_allow_html=True)
+
+            numeric_cols_clubs = clubs_extended.select_dtypes(include=[np.number]).columns.tolist()
+            exclude_cols_clubs = ["classement"]
+            stat_cols_clubs = [c for c in numeric_cols_clubs if c not in exclude_cols_clubs]
+
+            selected_stats_clubs = st.multiselect(
+                "Choisir les statistiques à afficher dans le radar (clubs)",
+                options=stat_cols_clubs,
+                default=stat_cols_clubs[:5] if len(stat_cols_clubs) > 5 else stat_cols_clubs
+            )
+
+            if selected_stats_clubs and not selected_clubs_df.empty:
+                radar_data = []
+                for _, club in selected_clubs_df.iterrows():
+                    entry = {"Joueur": club.get("club", "")}
+                    for stat in selected_stats_clubs:
+                        entry[stat] = club.get(stat, np.nan)
+                    radar_data.append(entry)
+
+                radar_df = pd.DataFrame(radar_data)
+                fig = make_scatter_radar(radar_df, selected_stats_clubs)
+                st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True, "displaylogo": False, "doubleClick": "reset"})
+
+                st.subheader("📊 Tableau comparatif des clubs")
+                table_df = radar_df.set_index("Joueur").T
+                st.dataframe(table_df)
+
+                st.download_button("⬇️ Télécharger en CSV", table_df.to_csv().encode("utf-8"),
+                                   file_name="comparatif_clubs.csv", mime="text/csv")
+
+                img_file = dataframe_to_image(table_df, "comparatif_clubs.png")
+                with open(img_file, "rb") as f:
+                    st.download_button("⬇️ Télécharger en PNG", f, file_name="comparatif_clubs.png", mime="image/png")
+            else:
+                st.warning("Veuillez sélectionner au moins une statistique et un club pour afficher le radar.")
+        else:
+            st.info("Aucun club sélectionné pour cette saison.")
