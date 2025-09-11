@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 # -----------------------------------------------------------------
 # CONFIG
 # -----------------------------------------------------------------
-DB_FILE = "top14_prod2_24_25_players_clubs.db"  # adapte le nom si besoin
+DB_FILE = "top14_prod2_25_26_players_clubs.db"  # adapte le nom si besoin
 IMAGES_DIR = "images"
 FALLBACK_IMAGE = os.path.join(IMAGES_DIR, "no_player.webp")
 
@@ -603,3 +603,4 @@ else:
                 st.warning("Veuillez sélectionner au moins une statistique et un club pour afficher le radar.")
         else:
             st.info("Aucun club sélectionné pour cette saison.")
+
