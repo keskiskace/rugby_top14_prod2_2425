@@ -1,4 +1,94 @@
-# (suite du fichier précédent)
+# ----------------------
+# SECTION JOUEURS
+# ----------------------
+st.header("🔎 Joueurs — Comparateur")
+
+# ----------------------
+# FILTRES AVANCÉS
+# ----------------------
+st.subheader("🎛️ Filtres")
+
+# 1. Saison (déjà géré plus haut : selected_saisons + df_filtered)
+
+# 2. Division (Top14 / ProD2)
+if "division" in df_filtered.columns:
+    divisions_dispo = sorted(df_filtered['division'].dropna().unique())
+    selected_div = st.multiselect(
+        "Choisir une division (optionnel)",
+        divisions_dispo,
+        default=[]
+    )
+    if selected_div:
+        df_filtered = df_filtered[df_filtered['division'].isin(selected_div)]
+
+# 3. Club
+if "club" in df_filtered.columns:
+    clubs_dispo = sorted(df_filtered['club'].dropna().unique())
+    selected_clubs = st.multiselect(
+        "Choisir un ou plusieurs clubs (optionnel)",
+        clubs_dispo,
+        default=[]
+    )
+    if selected_clubs:
+        df_filtered = df_filtered[df_filtered['club'].isin(selected_clubs)]
+
+# 4. Poste
+if "poste" in df_filtered.columns:
+    postes_dispo = sorted(df_filtered['poste'].dropna().unique())
+    selected_postes = st.multiselect(
+        "Choisir un ou plusieurs postes (optionnel)",
+        postes_dispo,
+        default=[]
+    )
+    if selected_postes:
+        df_filtered = df_filtered[df_filtered['poste'].isin(selected_postes)]
+
+# 5. Joueurs restants
+player_options = df_filtered['display_name'].sort_values().unique().tolist()
+if player_options:
+    selected_names = st.multiselect(
+        "Choisir un ou plusieurs joueurs",
+        player_options,
+        default=[player_options[0]]
+    )
+    selected_players = df_filtered[df_filtered['display_name'].isin(selected_names)].copy()
+else:
+    selected_players = pd.DataFrame()
+    st.warning("Aucun joueur ne correspond aux filtres choisis.")
+
+# Sélection joueurs types (si présents)
+selected_types = []
+if not extra_df.empty:
+    types_opts = extra_df['nom'].sort_values().unique().tolist()
+    selected_types = st.multiselect("Choisir un ou plusieurs joueurs types", types_opts, default=[])
+    selected_type_players = extra_df[extra_df['nom'].isin(selected_types)].copy()
+else:
+    selected_type_players = pd.DataFrame()
+
+# Concat sélection réelle + joueurs types
+if not selected_type_players.empty and not selected_players.empty:
+    selected_players = pd.concat([selected_players, selected_type_players], ignore_index=True)
+elif not selected_type_players.empty and selected_players.empty:
+    selected_players = selected_type_players.copy()
+
+# Affichage des joueurs sélectionnés (photo + infos)
+for _, joueur in selected_players.iterrows():
+    nom_aff = joueur.get('nom', '')
+    st.subheader(nom_aff)
+    if "Joueur type" not in str(nom_aff):
+        # joueur réel -> image et json info
+        photo_to_show = get_image_safe(joueur)
+        st.image(photo_to_show, caption=joueur.get('club', ''), width=150)
+        st.json({
+            "Club": joueur.get('club', 'N/A'),
+            "Poste": joueur.get('poste', 'N/A'),
+            "Âge": joueur.get('age', 'N/A'),
+            "Taille (cm)": joueur.get('taille_cm', 'N/A'),
+            "Poids (kg)": joueur.get('poids_kg', 'N/A'),
+            "Ratio poids/taille": joueur.get('ratio_poids_taille', 'N/A')
+        })
+    else:
+        st.info("📊 Joueur type (moyenne des stats).")
 
 # Affichage des joueurs sélectionnés
 for _, joueur in selected_players.iterrows():
@@ -189,3 +279,4 @@ else:
                 st.warning("Veuillez sélectionner au moins une statistique et un club pour afficher le radar.")
         else:
             st.info("Aucun club sélectionné pour cette saison.")
+
